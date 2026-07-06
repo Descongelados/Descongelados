@@ -47,7 +47,7 @@ const emptyUserForm = (): UserForm => ({
 
 export default function SettingsView() {
   const { push } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const [tab, setTab] = useState<'empresa' | 'usuarios'>('empresa');
 
   // ── Company ──────────────────────────────────────────────────────────────
@@ -76,6 +76,7 @@ export default function SettingsView() {
   const [usersLoading, setUsersLoading] = useState(true);
   const [userModal, setUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
+  const [isSelfEdit, setIsSelfEdit] = useState(false);
   const [userForm, setUserForm] = useState<UserForm>(emptyUserForm());
   const [showPassword, setShowPassword] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
@@ -90,13 +91,16 @@ export default function SettingsView() {
 
   const openCreateUser = () => {
     setEditingUser(null);
+    setIsSelfEdit(false);
     setUserForm(emptyUserForm());
     setShowPassword(false);
     setUserModal(true);
   };
 
   const openEditUser = (u: AppUser) => {
+    const selfEdit = !isAdmin && u.id === currentUser?.id;
     setEditingUser(u);
+    setIsSelfEdit(selfEdit);
     setUserForm({ name: u.name, username: u.username, password: u.password, roles: [...u.roles], active: u.active });
     setShowPassword(false);
     setUserModal(true);
@@ -111,6 +115,20 @@ export default function SettingsView() {
 
   const saveUser = async () => {
     if (!userForm.name.trim()) { push('error', 'El nombre es obligatorio'); return; }
+
+    // Non-admin self-edit: only name + password allowed
+    if (isSelfEdit) {
+      const { error } = await supabase.from('app_users').update({
+        name: userForm.name.trim(),
+        password: userForm.password.trim() || editingUser!.password,
+      }).eq('id', editingUser!.id);
+      if (error) { push('error', 'Error al actualizar perfil'); return; }
+      push('success', 'Perfil actualizado');
+      setUserModal(false);
+      await refreshUsers();
+      return;
+    }
+
     if (!userForm.username.trim()) { push('error', 'El usuario es obligatorio'); return; }
     if (!editingUser && !userForm.password.trim()) { push('error', 'La contraseña es obligatoria'); return; }
     if (userForm.roles.length === 0) { push('error', 'Asigna al menos un rol'); return; }
@@ -273,7 +291,7 @@ export default function SettingsView() {
           <div className="card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 border-b border-ink-100 bg-ink-50/50">
               <h3 className="text-sm font-semibold text-ink-700 flex items-center gap-2"><Users size={15} /> Usuarios del sistema</h3>
-              <button className="btn-primary text-xs" onClick={openCreateUser}><Plus size={14} /> Nuevo usuario</button>
+              {isAdmin && <button className="btn-primary text-xs" onClick={openCreateUser}><Plus size={14} /> Nuevo usuario</button>}
             </div>
             {usersLoading ? (
               <div className="py-10 text-center text-sm text-ink-400">Cargando usuarios…</div>
@@ -304,21 +322,31 @@ export default function SettingsView() {
                           </div>
                         </td>
                         <td className="table-cell">
-                          <button
-                            onClick={() => toggleActive(u)}
-                            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold transition ${u.active ? 'bg-success-100 text-success-700 hover:bg-success-200' : 'bg-ink-100 text-ink-500 hover:bg-ink-200'}`}
-                          >
-                            {u.active ? 'Activo' : 'Inactivo'}
-                          </button>
+                          {isAdmin ? (
+                            <button
+                              onClick={() => toggleActive(u)}
+                              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold transition ${u.active ? 'bg-success-100 text-success-700 hover:bg-success-200' : 'bg-ink-100 text-ink-500 hover:bg-ink-200'}`}
+                            >
+                              {u.active ? 'Activo' : 'Inactivo'}
+                            </button>
+                          ) : (
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${u.active ? 'bg-success-100 text-success-700' : 'bg-ink-100 text-ink-500'}`}>
+                              {u.active ? 'Activo' : 'Inactivo'}
+                            </span>
+                          )}
                         </td>
                         <td className="table-cell text-right">
                           <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => openEditUser(u)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Editar">
-                              <Pencil size={15} />
-                            </button>
-                            <button onClick={() => setDeleteTarget(u)} disabled={u.id === currentUser?.id} className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition disabled:opacity-30" aria-label="Eliminar">
-                              <Trash2 size={15} />
-                            </button>
+                            {(isAdmin || u.id === currentUser?.id) && (
+                              <button onClick={() => openEditUser(u)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Editar">
+                                <Pencil size={15} />
+                              </button>
+                            )}
+                            {isAdmin && (
+                              <button onClick={() => setDeleteTarget(u)} disabled={u.id === currentUser?.id} className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition disabled:opacity-30" aria-label="Eliminar">
+                                <Trash2 size={15} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -335,7 +363,7 @@ export default function SettingsView() {
       <Modal
         open={userModal}
         onClose={() => setUserModal(false)}
-        title={editingUser ? 'Editar usuario' : 'Nuevo usuario'}
+        title={isSelfEdit ? 'Mi perfil' : editingUser ? 'Editar usuario' : 'Nuevo usuario'}
         size="md"
         footer={
           <>
@@ -345,16 +373,23 @@ export default function SettingsView() {
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Name — always visible */}
+          <div className={isSelfEdit ? undefined : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
             <div>
               <label className="label">Nombre completo *</label>
               <input className="input" value={userForm.name} onChange={(e) => setUserForm((f) => ({ ...f, name: e.target.value }))} placeholder="Nombre visible" />
             </div>
-            <div>
-              <label className="label">Usuario (login) *</label>
-              <input className="input" value={userForm.username} onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))} placeholder="usuario123" autoCapitalize="none" />
-            </div>
+
+            {/* Username — admin only */}
+            {!isSelfEdit && (
+              <div>
+                <label className="label">Usuario (login) *</label>
+                <input className="input" value={userForm.username} onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))} placeholder="usuario123" autoCapitalize="none" />
+              </div>
+            )}
           </div>
+
+          {/* Password — always visible */}
           <div>
             <label className="label">{editingUser ? 'Contraseña (dejar vacío para no cambiar)' : 'Contraseña *'}</label>
             <div className="relative">
@@ -371,41 +406,47 @@ export default function SettingsView() {
             </div>
           </div>
 
-          <div>
-            <label className="label">Roles * (puede tener más de uno)</label>
-            <div className="grid grid-cols-1 gap-2">
-              {ALL_ROLES.map((role) => {
-                const active = userForm.roles.includes(role);
-                return (
-                  <button
-                    key={role}
-                    type="button"
-                    onClick={() => toggleRole(role)}
-                    className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition ${active ? 'border-brand-400 bg-brand-50' : 'border-ink-200 hover:bg-ink-50'}`}
-                  >
-                    <div className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition ${active ? 'border-brand-500 bg-brand-500' : 'border-ink-300'}`}>
-                      {active && <Check size={10} className="text-white" strokeWidth={3} />}
-                    </div>
-                    <div>
-                      <p className={`text-sm font-semibold ${active ? 'text-brand-700' : 'text-ink-800'}`}>{ROLE_LABELS[role]}</p>
-                      <p className="text-xs text-ink-500">{ROLE_DESCRIPTIONS[role]}</p>
-                    </div>
-                  </button>
-                );
-              })}
+          {/* Roles — admin only */}
+          {!isSelfEdit && (
+            <div>
+              <label className="label">Roles * (puede tener más de uno)</label>
+              <div className="grid grid-cols-1 gap-2">
+                {ALL_ROLES.map((role) => {
+                  const active = userForm.roles.includes(role);
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => toggleRole(role)}
+                      className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition ${active ? 'border-brand-400 bg-brand-50' : 'border-ink-200 hover:bg-ink-50'}`}
+                    >
+                      <div className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition ${active ? 'border-brand-500 bg-brand-500' : 'border-ink-300'}`}>
+                        {active && <Check size={10} className="text-white" strokeWidth={3} />}
+                      </div>
+                      <div>
+                        <p className={`text-sm font-semibold ${active ? 'text-brand-700' : 'text-ink-800'}`}>{ROLE_LABELS[role]}</p>
+                        <p className="text-xs text-ink-500">{ROLE_DESCRIPTIONS[role]}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="flex items-center gap-2 rounded-lg border border-ink-200 px-3 py-2.5">
-            <input
-              id="user-active"
-              type="checkbox"
-              checked={userForm.active}
-              onChange={(e) => setUserForm((f) => ({ ...f, active: e.target.checked }))}
-              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-200"
-            />
-            <label htmlFor="user-active" className="text-sm text-ink-700 cursor-pointer select-none">Usuario activo</label>
-          </div>
+          {/* Active toggle — admin only */}
+          {!isSelfEdit && (
+            <div className="flex items-center gap-2 rounded-lg border border-ink-200 px-3 py-2.5">
+              <input
+                id="user-active"
+                type="checkbox"
+                checked={userForm.active}
+                onChange={(e) => setUserForm((f) => ({ ...f, active: e.target.checked }))}
+                className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-200"
+              />
+              <label htmlFor="user-active" className="text-sm text-ink-700 cursor-pointer select-none">Usuario activo</label>
+            </div>
+          )}
         </div>
       </Modal>
 
