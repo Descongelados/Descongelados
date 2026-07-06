@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Truck,
   Wallet,
-  Trash2,
   Search,
-  Pencil,
   Banknote,
   Building,
   Layers,
@@ -37,8 +35,6 @@ const PAYMENT_METHODS = [
   { value: 'por_pagar', label: 'Por pagar', icon: Wallet },
   { value: 'combinado', label: 'Combinado', icon: Layers },
 ];
-
-const methodLabel = (m: string) => PAYMENT_METHODS.find((p) => p.value === m)?.label ?? m;
 
 type PaymentForm = {
   customer_id: string;
@@ -74,7 +70,6 @@ export default function Collections() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [methodFilter, setMethodFilter] = useState('all');
 
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<SaleRow | null>(null);
@@ -171,18 +166,6 @@ export default function Collections() {
     );
   }, [tab, pendingDeliveries, deliveredSales, search]);
 
-  const filteredCollections = useMemo(() => {
-    if (!collections) return [];
-    return collections.filter((c) => {
-      const matchesSearch =
-        !search ||
-        c.customer?.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.reference?.toLowerCase().includes(search.toLowerCase());
-      const matchesMethod = methodFilter === 'all' || c.payment_method === methodFilter;
-      return matchesSearch && matchesMethod;
-    });
-  }, [collections, search, methodFilter]);
-
   const totalCollectedToday = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return (collections ?? [])
@@ -211,23 +194,6 @@ export default function Collections() {
     setPaymentOpen(true);
   };
 
-  const openEditPayment = (c: CollectionRow) => {
-    setPaymentTarget(null);
-    setEditPayment(c);
-    setPaymentForm({
-      customer_id: c.customer_id,
-      sale_id: c.sale_id ?? '',
-      method: c.payment_method,
-      amount: String(c.amount),
-      efectivo: c.payment_method === 'combinado' ? String(c.amount) : String(c.amount),
-      banco: '0',
-      por_pagar: '0',
-      reference: c.reference ?? '',
-      payment_date: toDateInputValue(c.collection_date),
-      notes: c.notes ?? '',
-    });
-    setPaymentOpen(true);
-  };
 
   const combinedTotal = useMemo(() => {
     const e = Number(paymentForm.efectivo) || 0;
@@ -423,9 +389,16 @@ export default function Collections() {
           }`}
         >
           <Truck size={16} /> Entregas
-          <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
-            {pendingDeliveries.length}
-          </span>
+          {pendingDeliveries.length > 0 ? (
+            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-warning-500 px-2 py-0.5 text-xs font-semibold text-white">
+              <AlertCircle size={10} />
+              {pendingDeliveries.length}
+            </span>
+          ) : (
+            <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
+              0
+            </span>
+          )}
         </button>
         <button
           onClick={() => setTab('cobranza')}
@@ -473,20 +446,6 @@ export default function Collections() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          {tab === 'cobranza' && (
-            <select
-              className="input w-auto"
-              value={methodFilter}
-              onChange={(e) => setMethodFilter(e.target.value)}
-            >
-              <option value="all">Todos los métodos</option>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          )}
         </div>
       </div>
 
@@ -638,84 +597,15 @@ export default function Collections() {
             </div>
           )}
 
-          {/* Historial de pagos registrados */}
-          <div className="card overflow-hidden">
-            {loading ? (
-              <FullPageLoader />
-            ) : filteredCollections.length === 0 ? (
+          {pendingPaymentSales.length === 0 && (
+            <div className="card p-5">
               <EmptyState
                 icon={Wallet}
-                title="Sin cobranza registrada"
-                description="Los pagos registrados aparecerán aquí."
+                title="Sin cobros pendientes"
+                description="Todas las ventas entregadas están al corriente."
               />
-            ) : (
-              <>
-                <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-ink-50/50">
-                  <Wallet size={16} className="text-ink-500" />
-                  <h3 className="text-sm font-semibold text-ink-700">Historial de pagos</h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-ink-100">
-                    <thead className="bg-ink-50/60">
-                      <tr>
-                        <th className="table-head">Fecha</th>
-                        <th className="table-head">Cliente</th>
-                        <th className="table-head">Folio venta</th>
-                        <th className="table-head">Método</th>
-                        <th className="table-head">Referencia</th>
-                        <th className="table-head text-right">Monto</th>
-                        <th className="table-head text-right">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-ink-100">
-                      {filteredCollections.map((c) => (
-                        <tr key={c.id} className="hover:bg-ink-50/60 transition">
-                          <td className="table-cell">{formatDate(c.collection_date)}</td>
-                          <td className="table-cell font-semibold text-ink-900">{c.customer?.name ?? '—'}</td>
-                          <td className="table-cell font-mono text-xs">{c.sale?.invoice_number ?? '—'}</td>
-                          <td className="table-cell">
-                            <Badge variant="neutral">{methodLabel(c.payment_method)}</Badge>
-                          </td>
-                          <td className="table-cell">{c.reference ?? '—'}</td>
-                          <td className="table-cell text-right font-semibold text-success-600">
-                            {formatCurrency(c.amount)}
-                          </td>
-                          <td className="table-cell text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {c.sale && (
-                                <button
-                                  onClick={() => setReceiptSale(c.sale as SaleRow)}
-                                  className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
-                                  aria-label="Ver ticket"
-                                  title="Ver ticket"
-                                >
-                                  <Receipt size={16} />
-                                </button>
-                              )}
-                              <button
-                                onClick={() => openEditPayment(c)}
-                                className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                                aria-label="Editar"
-                              >
-                                <Pencil size={16} />
-                              </button>
-                              <button
-                                onClick={() => setDeleteTarget(c)}
-                                className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
-                                aria-label="Eliminar"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       ) : (
         /* ── Pestaña: Ventas cobradas ── */
