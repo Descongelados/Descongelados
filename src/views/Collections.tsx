@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   PackageCheck,
   AlertCircle,
+  Receipt,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Collection, Customer, Sale } from '../lib/types';
@@ -22,6 +23,7 @@ import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
+import SaleReceiptModal from '../components/ui/SaleReceiptModal';
 
 type SaleRow = Sale & { customer: Customer | null };
 type CollectionRow = Collection & {
@@ -82,6 +84,7 @@ export default function Collections() {
   const [editPayment, setEditPayment] = useState<CollectionRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CollectionRow | null>(null);
   const [confirmDelivery, setConfirmDelivery] = useState<SaleRow | null>(null);
+  const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -556,6 +559,14 @@ export default function Collections() {
                           >
                             <Wallet size={14} /> Registrar pago
                           </button>
+                          <button
+                            onClick={() => setReceiptSale(s)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                            aria-label="Ver ticket"
+                            title="Ver ticket"
+                          >
+                            <Receipt size={16} />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -602,12 +613,22 @@ export default function Collections() {
                           {formatCurrency(s.balance)}
                         </td>
                         <td className="table-cell text-right">
-                          <button
-                            onClick={() => openRegisterPayment(s)}
-                            className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
-                          >
-                            <Wallet size={14} /> Registrar pago
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => openRegisterPayment(s)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
+                            >
+                              <Wallet size={14} /> Registrar pago
+                            </button>
+                            <button
+                              onClick={() => setReceiptSale(s)}
+                              className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                              aria-label="Ver ticket"
+                              title="Ver ticket"
+                            >
+                              <Receipt size={16} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -661,6 +682,16 @@ export default function Collections() {
                           </td>
                           <td className="table-cell text-right">
                             <div className="flex items-center justify-end gap-1">
+                              {c.sale && (
+                                <button
+                                  onClick={() => setReceiptSale(c.sale as SaleRow)}
+                                  className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                                  aria-label="Ver ticket"
+                                  title="Ver ticket"
+                                >
+                                  <Receipt size={16} />
+                                </button>
+                              )}
                               <button
                                 onClick={() => openEditPayment(c)}
                                 className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
@@ -708,6 +739,7 @@ export default function Collections() {
                     <th className="table-head text-right">Total</th>
                     <th className="table-head text-right">Total cobrado</th>
                     <th className="table-head">Estado</th>
+                    <th className="table-head text-right">Ticket</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-100">
@@ -724,6 +756,16 @@ export default function Collections() {
                         <Badge variant="success">
                           <CheckCircle2 size={12} /> Cobrada
                         </Badge>
+                      </td>
+                      <td className="table-cell text-right">
+                        <button
+                          onClick={() => setReceiptSale(s)}
+                          className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                          aria-label="Ver ticket"
+                          title="Ver ticket"
+                        >
+                          <Receipt size={16} />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -972,6 +1014,7 @@ export default function Collections() {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+      <SaleReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />
     </div>
   );
 }

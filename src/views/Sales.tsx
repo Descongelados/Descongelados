@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp,
   Plus,
@@ -9,13 +9,11 @@ import {
   X,
   Package,
   Users,
-  Download,
-  Share2,
-  CheckCircle2,
+  Receipt,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Customer, Product, Sale, SaleItem } from '../lib/types';
-import { formatCurrency, formatDate, formatDateTime, fromDateInputValue, toDateInputValue } from '../lib/format';
+import { formatCurrency, formatDate, fromDateInputValue, toDateInputValue } from '../lib/format';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
@@ -23,6 +21,7 @@ import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
+import SaleReceiptModal from '../components/ui/SaleReceiptModal';
 
 type SaleRow = Sale & { customer: Customer | null };
 type ItemRow = {
@@ -70,8 +69,6 @@ export default function Sales() {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
-  const [receiptItems, setReceiptItems] = useState<(SaleItem & { product: Product | null })[]>([]);
-  const receiptRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -246,47 +243,7 @@ export default function Sales() {
     }
   };
 
-  const openReceipt = async (s: SaleRow) => {
-    setReceiptSale(s);
-    const { data } = await supabase
-      .from('sale_items')
-      .select('*, product:products(*)')
-      .eq('sale_id', s.id);
-    setReceiptItems((data as (SaleItem & { product: Product | null })[]) ?? []);
-  };
-
-  const downloadReceiptPDF = () => {
-    window.print();
-  };
-
-  const shareReceipt = async () => {
-    if (!receiptSale) return;
-    const customer = receiptSale.customer;
-    const lines = receiptItems.map(
-      (it) => `• ${it.product?.name ?? 'Producto'} x${it.quantity} — ${formatCurrency(it.subtotal)}`,
-    );
-    const text =
-      `Recibo de venta\n` +
-      `Folio: ${receiptSale.invoice_number ?? '—'}\n` +
-      `Cliente: ${customer?.name ?? '—'}\n` +
-      `Fecha: ${formatDateTime(receiptSale.sale_date)}\n\n` +
-      `Productos:\n${lines.join('\n')}\n\n` +
-      `Subtotal: ${formatCurrency(receiptSale.subtotal)}\n` +
-      `Impuesto: ${formatCurrency(receiptSale.tax)}\n` +
-      `Total: ${formatCurrency(receiptSale.total)}`;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: `Recibo ${receiptSale.invoice_number ?? ''}`, text });
-      } else if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-        push('success', 'Recibo copiado al portapapeles');
-      } else {
-        push('info', 'Tu navegador no soporta compartir. Usa descargar PDF.');
-      }
-    } catch {
-      // user cancelled share — no action needed
-    }
-  };
+  const openReceipt = (s: SaleRow) => setReceiptSale(s);
 
   const openDetail = async (s: SaleRow) => {
     setDetailOpen(s);
@@ -390,10 +347,10 @@ export default function Sales() {
                         <button
                           onClick={() => openReceipt(s)}
                           className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
-                          aria-label="Recibo"
-                          title="Recibo"
+                          aria-label="Ver ticket"
+                          title="Ver ticket"
                         >
-                          <Download size={16} />
+                          <Receipt size={16} />
                         </button>
                         <button
                           onClick={() => openDetail(s)}
@@ -703,110 +660,7 @@ export default function Sales() {
         )}
       </Modal>
 
-      <Modal
-        open={!!receiptSale}
-        onClose={() => setReceiptSale(null)}
-        title="Recibo de venta"
-        description="Descarga en PDF o comparte con el cliente."
-        size="md"
-        footer={
-          <div className="flex items-center justify-end gap-2 w-full">
-            <button className="btn-secondary" onClick={() => setReceiptSale(null)}>
-              Cerrar
-            </button>
-            <button className="btn-secondary" onClick={shareReceipt}>
-              <Share2 size={16} /> Compartir
-            </button>
-            <button className="btn-primary" onClick={downloadReceiptPDF}>
-              <Download size={16} /> Descargar PDF
-            </button>
-          </div>
-        }
-      >
-        <div ref={receiptRef} className="receipt-print-area">
-          <div className="flex items-start justify-between border-b border-ink-200 pb-4">
-            <div>
-              <h2 className="text-lg font-bold text-ink-900">Recibo de venta</h2>
-              <p className="text-xs text-ink-500 mt-0.5">Comprobante interno · no fiscal</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-ink-500 uppercase font-semibold">Folio</p>
-              <p className="font-mono font-bold text-ink-900">{receiptSale?.invoice_number ?? '—'}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 py-4 text-sm">
-            <div>
-              <p className="text-xs text-ink-500 uppercase font-semibold">Cliente</p>
-              <p className="font-medium text-ink-800">{receiptSale?.customer?.name ?? '—'}</p>
-              {receiptSale?.customer?.phone && (
-                <p className="text-xs text-ink-500">{receiptSale.customer.phone}</p>
-              )}
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-ink-500 uppercase font-semibold">Fecha</p>
-              <p className="font-medium text-ink-800">{formatDateTime(receiptSale?.sale_date ?? null)}</p>
-            </div>
-          </div>
-
-          <div className="border border-ink-200 rounded-lg overflow-hidden">
-            <table className="min-w-full divide-y divide-ink-100">
-              <thead className="bg-ink-50/60">
-                <tr>
-                  <th className="table-head">Producto</th>
-                  <th className="table-head text-right">Cant.</th>
-                  <th className="table-head text-right">Precio</th>
-                  <th className="table-head text-right">Subtotal</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink-100">
-                {receiptItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-ink-400">
-                      Sin productos
-                    </td>
-                  </tr>
-                ) : (
-                  receiptItems.map((it) => (
-                    <tr key={it.id}>
-                      <td className="table-cell font-medium text-ink-800">
-                        {it.product?.name ?? 'Producto eliminado'}
-                      </td>
-                      <td className="table-cell text-right">{it.quantity}</td>
-                      <td className="table-cell text-right">{formatCurrency(it.unit_price)}</td>
-                      <td className="table-cell text-right font-semibold">{formatCurrency(it.subtotal)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex justify-end pt-4">
-            <div className="w-full sm:w-64 space-y-1.5">
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-500">Subtotal</span>
-                <span className="font-medium text-ink-800">{formatCurrency(receiptSale?.subtotal ?? 0)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-500">Impuesto</span>
-                <span className="font-medium text-ink-800">{formatCurrency(receiptSale?.tax ?? 0)}</span>
-              </div>
-              <div className="flex justify-between pt-1.5 border-t border-ink-200">
-                <span className="font-semibold text-ink-900">Total</span>
-                <span className="font-bold text-ink-900 text-base">{formatCurrency(receiptSale?.total ?? 0)}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 pt-4 border-t border-ink-200 text-center">
-            <div className="inline-flex items-center gap-1.5 text-success-600 text-sm font-semibold">
-              <CheckCircle2 size={14} /> Venta confirmada
-            </div>
-            <p className="text-xs text-ink-400 mt-1">Gracias por su compra.</p>
-          </div>
-        </div>
-      </Modal>
+      <SaleReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />
 
       <ConfirmDialog
         open={!!deleteTarget}
