@@ -1,0 +1,820 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  TrendingUp,
+  Plus,
+  Trash2,
+  Search,
+  Eye,
+  Pencil,
+  X,
+  Package,
+  Users,
+  Download,
+  Share2,
+  CheckCircle2,
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { Customer, Product, Sale, SaleItem } from '../lib/types';
+import { formatCurrency, formatDate, formatDateTime, fromDateInputValue, toDateInputValue } from '../lib/format';
+import PageHeader from '../components/ui/PageHeader';
+import Modal from '../components/ui/Modal';
+import Badge from '../components/ui/Badge';
+import EmptyState from '../components/ui/EmptyState';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { useToast } from '../components/ui/Toast';
+import { FullPageLoader } from '../components/ui/Spinner';
+
+type SaleRow = Sale & { customer: Customer | null };
+type ItemRow = {
+  id: string;
+  product_id: string;
+  quantity: string;
+  unit_price: string;
+};
+
+const TAX_RATE = 0.16;
+
+const generateInvoiceNumber = (existing: SaleRow[]): string => {
+  const year = new Date().getFullYear();
+  const prefix = `VTA-${year}-`;
+  const maxNum = existing
+    .map((s) => {
+      const m = (s.invoice_number ?? '').match(/VTA-\d{4}-(\d+)/);
+      return m ? Number(m[1]) : 0;
+    })
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `${prefix}${String(maxNum + 1).padStart(4, '0')}`;
+};
+
+export default function Sales() {
+  const { push } = useToast();
+  const [sales, setSales] = useState<SaleRow[] | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState<SaleRow | null>(null);
+  const [detailItems, setDetailItems] = useState<(SaleItem & { product: Product | null })[]>([]);
+  const [editing, setEditing] = useState<Sale | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SaleRow | null>(null);
+
+  const [form, setForm] = useState({
+    customer_id: '',
+    invoice_number: '',
+    sale_date: toDateInputValue(new Date()),
+    notes: '',
+    status: 'confirmada',
+    has_tax: true,
+  });
+  const [items, setItems] = useState<ItemRow[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
+  const [receiptItems, setReceiptItems] = useState<(SaleItem & { product: Product | null })[]>([]);
+  const receiptRef = useRef<HTMLDivElement>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const [sRes, cRes, prodRes] = await Promise.all([
+      supabase.from('sales').select('*, customer:customers(*)').order('sale_date', { ascending: false }),
+      supabase.from('customers').select('*').order('name'),
+      supabase.from('products').select('*').order('name'),
+    ]);
+    if (sRes.error) {
+      push('error', 'No se pudieron cargar las ventas');
+      setSales([]);
+    } else {
+      setSales(sRes.data as SaleRow[]);
+    }
+    if (!cRes.error) setCustomers(cRes.data as Customer[]);
+    if (!prodRes.error) setProducts(prodRes.data as Product[]);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!sales) return [];
+    return sales.filter((s) => {
+      const matchesSearch =
+        !search ||
+        s.invoice_number?.toLowerCase().includes(search.toLowerCase()) ||
+        s.customer?.name.toLowerCase().includes(search.toLowerCase());
+      return matchesSearch;
+    });
+  }, [sales, search]);
+
+  const totals = useMemo(() => {
+    const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
+    const tax = form.has_tax ? subtotal * TAX_RATE : 0;
+    return { subtotal, tax, total: subtotal + tax };
+  }, [items, form.has_tax]);
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm({
+      customer_id: customers[0]?.id ?? '',
+      invoice_number: generateInvoiceNumber(sales ?? []),
+      sale_date: toDateInputValue(new Date()),
+      notes: '',
+      status: 'confirmada',
+      has_tax: true,
+    });
+    setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
+    setModalOpen(true);
+  };
+
+  const openEdit = async (s: SaleRow) => {
+    setEditing(s);
+    const { data: existingItems } = await supabase.from('sale_items').select('*').eq('sale_id', s.id);
+    setForm({
+      customer_id: s.customer_id,
+      invoice_number: s.invoice_number ?? '',
+      sale_date: toDateInputValue(s.sale_date),
+      notes: s.notes ?? '',
+      status: s.status,
+      has_tax: Number(s.tax) > 0,
+    });
+    setItems(
+      (existingItems ?? []).map((it) => ({
+        id: it.id,
+        product_id: it.product_id,
+        quantity: String(it.quantity),
+        unit_price: String(it.unit_price),
+      })),
+    );
+    setModalOpen(true);
+  };
+
+  const addItem = () =>
+    setItems([...items, { id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
+
+  const updateItem = (id: string, patch: Partial<ItemRow>) =>
+    setItems(items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+
+  const removeItem = (id: string) => setItems(items.filter((it) => it.id !== id));
+
+  const onProductChange = (id: string, productId: string) => {
+    const product = products.find((p) => p.id === productId);
+    updateItem(id, { product_id: productId, unit_price: product ? String(product.sale_price) : '0' });
+  };
+
+  const save = async () => {
+    if (!form.customer_id) {
+      push('error', 'Selecciona un cliente');
+      return;
+    }
+    const validItems = items.filter((it) => it.product_id && Number(it.quantity) > 0);
+    if (validItems.length === 0) {
+      push('error', 'Agrega al menos un producto');
+      return;
+    }
+    for (const it of validItems) {
+      const product = products.find((p) => p.id === it.product_id);
+      if (product && Number(it.quantity) > product.stock) {
+        push('error', `Stock insuficiente para ${product.name} (disponible: ${product.stock})`);
+        return;
+      }
+    }
+    setSaving(true);
+    const payload = {
+      customer_id: form.customer_id,
+      invoice_number: form.invoice_number.trim() || null,
+      sale_date: fromDateInputValue(form.sale_date),
+      notes: form.notes.trim() || null,
+      status: form.status,
+      subtotal: totals.subtotal,
+      tax: totals.tax,
+      total: totals.total,
+    };
+
+    if (editing) {
+      const { error } = await supabase.from('sales').update(payload).eq('id', editing.id);
+      if (error) {
+        push('error', 'No se pudo actualizar la venta');
+        setSaving(false);
+        return;
+      }
+      await supabase.from('sale_items').delete().eq('sale_id', editing.id);
+      const itemPayload = validItems.map((it) => ({
+        sale_id: editing.id,
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        unit_price: Number(it.unit_price),
+        subtotal: Number(it.quantity) * Number(it.unit_price),
+      }));
+      const { error: itemErr } = await supabase.from('sale_items').insert(itemPayload);
+      if (itemErr) {
+        push('error', 'No se guardaron los productos');
+        setSaving(false);
+        return;
+      }
+      push('success', 'Venta actualizada');
+      setModalOpen(false);
+      load();
+      setSaving(false);
+    } else {
+      const { data: created, error } = await supabase.from('sales').insert(payload).select().single();
+      if (error) {
+        push('error', 'No se pudo crear la venta');
+        setSaving(false);
+        return;
+      }
+      const itemPayload = validItems.map((it) => ({
+        sale_id: created.id,
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        unit_price: Number(it.unit_price),
+        subtotal: Number(it.quantity) * Number(it.unit_price),
+      }));
+      const { error: itemErr } = await supabase.from('sale_items').insert(itemPayload);
+      if (itemErr) {
+        push('error', 'No se guardaron los productos');
+        setSaving(false);
+        return;
+      }
+      push('success', 'Venta registrada');
+      setModalOpen(false);
+      setSaving(false);
+      await load();
+      const createdRow = (sales ?? []).find((s) => s.id === created.id) ?? null;
+      const row: SaleRow = createdRow ?? (created as SaleRow);
+      openReceipt(row);
+    }
+  };
+
+  const openReceipt = async (s: SaleRow) => {
+    setReceiptSale(s);
+    const { data } = await supabase
+      .from('sale_items')
+      .select('*, product:products(*)')
+      .eq('sale_id', s.id);
+    setReceiptItems((data as (SaleItem & { product: Product | null })[]) ?? []);
+  };
+
+  const downloadReceiptPDF = () => {
+    window.print();
+  };
+
+  const shareReceipt = async () => {
+    if (!receiptSale) return;
+    const customer = receiptSale.customer;
+    const lines = receiptItems.map(
+      (it) => `• ${it.product?.name ?? 'Producto'} x${it.quantity} — ${formatCurrency(it.subtotal)}`,
+    );
+    const text =
+      `Recibo de venta\n` +
+      `Folio: ${receiptSale.invoice_number ?? '—'}\n` +
+      `Cliente: ${customer?.name ?? '—'}\n` +
+      `Fecha: ${formatDateTime(receiptSale.sale_date)}\n\n` +
+      `Productos:\n${lines.join('\n')}\n\n` +
+      `Subtotal: ${formatCurrency(receiptSale.subtotal)}\n` +
+      `Impuesto: ${formatCurrency(receiptSale.tax)}\n` +
+      `Total: ${formatCurrency(receiptSale.total)}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Recibo ${receiptSale.invoice_number ?? ''}`, text });
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        push('success', 'Recibo copiado al portapapeles');
+      } else {
+        push('info', 'Tu navegador no soporta compartir. Usa descargar PDF.');
+      }
+    } catch {
+      // user cancelled share — no action needed
+    }
+  };
+
+  const openDetail = async (s: SaleRow) => {
+    setDetailOpen(s);
+    const { data } = await supabase
+      .from('sale_items')
+      .select('*, product:products(*)')
+      .eq('sale_id', s.id);
+    setDetailItems((data as (SaleItem & { product: Product | null })[]) ?? []);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { error } = await supabase.from('sales').delete().eq('id', deleteTarget.id);
+    if (error) {
+      push('error', 'No se pudo eliminar la venta');
+    } else {
+      push('success', 'Venta eliminada');
+      load();
+    }
+    setDeleteTarget(null);
+  };
+
+  return (
+    <div className="animate-fade-in">
+      <PageHeader
+        title="Ventas"
+        description="Facturas a clientes"
+        actions={
+          <button className="btn-primary" onClick={openCreate} disabled={customers.length === 0 || products.length === 0}>
+            <Plus size={16} /> Nueva venta
+          </button>
+        }
+      />
+
+      {(customers.length === 0 || products.length === 0) && !loading && (
+        <div className="card p-4 mb-4 flex items-start gap-3 bg-warning-50 border-warning-200">
+          <Users size={18} className="text-warning-600 mt-0.5" />
+          <p className="text-sm text-warning-700">
+            Necesitas al menos un cliente y un producto para registrar ventas.{' '}
+            {customers.length === 0 && 'Crea un cliente primero. '}
+            {products.length === 0 && 'Crea un producto en Inventario.'}
+          </p>
+        </div>
+      )}
+
+      <div className="card p-4 mb-4">
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+          <input
+            className="input pl-9"
+            placeholder="Buscar por folio o cliente…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        {loading ? (
+          <FullPageLoader />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={TrendingUp}
+            title="Sin ventas"
+            description="Registra tu primera venta a un cliente."
+            action={
+              <button className="btn-primary" onClick={openCreate} disabled={customers.length === 0 || products.length === 0}>
+                <Plus size={16} /> Nueva venta
+              </button>
+            }
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-ink-100">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="table-head">Folio</th>
+                  <th className="table-head">Cliente</th>
+                  <th className="table-head">Fecha</th>
+                  <th className="table-head text-right">Subtotal</th>
+                  <th className="table-head text-right">Impuesto</th>
+                  <th className="table-head text-right">Total</th>
+                  <th className="table-head">Estado</th>
+                  <th className="table-head text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {filtered.map((s) => (
+                  <tr key={s.id} className="hover:bg-ink-50/60 transition">
+                    <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
+                    <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
+                    <td className="table-cell">{formatDate(s.sale_date)}</td>
+                    <td className="table-cell text-right">{formatCurrency(s.subtotal)}</td>
+                    <td className="table-cell text-right">{formatCurrency(s.tax)}</td>
+                    <td className="table-cell text-right font-semibold">{formatCurrency(s.total)}</td>
+                    <td className="table-cell">
+                      <Badge variant={s.status === 'confirmada' ? 'success' : 'neutral'}>{s.status}</Badge>
+                    </td>
+                    <td className="table-cell text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openReceipt(s)}
+                          className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                          aria-label="Recibo"
+                          title="Recibo"
+                        >
+                          <Download size={16} />
+                        </button>
+                        <button
+                          onClick={() => openDetail(s)}
+                          className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
+                          aria-label="Ver detalle"
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          onClick={() => openEdit(s)}
+                          className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
+                          aria-label="Editar"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(s)}
+                          className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
+                          aria-label="Eliminar"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editing ? 'Editar venta' : 'Nueva venta'}
+        description="Los productos se descuentan del inventario al guardar."
+        size="xl"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <div className="text-sm text-ink-600">
+              <span className="text-ink-400">Total: </span>
+              <span className="font-bold text-ink-900 text-base">{formatCurrency(totals.total)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>
+                Cancelar
+              </button>
+              <button className="btn-primary" onClick={save} disabled={saving}>
+                {saving ? 'Guardando…' : 'Guardar venta'}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="label">Cliente *</label>
+              <select
+                className="input"
+                value={form.customer_id}
+                onChange={(e) => setForm({ ...form, customer_id: e.target.value })}
+              >
+                <option value="">Selecciona…</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Folio / Factura</label>
+              <input
+                className="input bg-ink-50 text-ink-600 cursor-not-allowed font-mono"
+                value={form.invoice_number}
+                readOnly
+                placeholder="Se genera automáticamente"
+              />
+              <p className="text-[10px] text-ink-400 mt-1">Se asigna automáticamente al crear la venta.</p>
+            </div>
+            <div>
+              <label className="label">Fecha</label>
+              <input
+                className="input"
+                type="date"
+                value={form.sale_date}
+                onChange={(e) => setForm({ ...form, sale_date: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label !mb-0">Productos</label>
+              <button className="btn-ghost text-xs" onClick={addItem}>
+                <Plus size={14} /> Agregar línea
+              </button>
+            </div>
+            <div className="space-y-2">
+              {items.map((it) => {
+                const product = products.find((p) => p.id === it.product_id);
+                const lineTotal = (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
+                const insufficient = product && Number(it.quantity) > product.stock;
+                return (
+                  <div
+                    key={it.id}
+                    className={`rounded-lg border p-3 ${
+                      insufficient ? 'border-danger-200 bg-danger-50/40' : 'border-ink-200 bg-ink-50/40'
+                    }`}
+                  >
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-12 sm:col-span-5">
+                        <label className="label">Producto</label>
+                        <select
+                          className="input"
+                          value={it.product_id}
+                          onChange={(e) => onProductChange(it.id, e.target.value)}
+                        >
+                          <option value="">Selecciona producto…</option>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id} disabled={p.stock <= 0}>
+                              {p.name} ({p.sku}) — stock {p.stock}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-span-5 sm:col-span-2">
+                        <label className="label">Cantidad</label>
+                        <input
+                          className="input"
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          value={it.quantity}
+                          onChange={(e) => updateItem(it.id, { quantity: e.target.value })}
+                          placeholder="0"
+                        />
+                      </div>
+                      <div className="col-span-5 sm:col-span-2">
+                        <label className="label">Precio unit.</label>
+                        <input
+                          className="input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={it.unit_price}
+                          onChange={(e) => updateItem(it.id, { unit_price: e.target.value })}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="col-span-2 sm:col-span-2">
+                        <label className="label">Subtotal</label>
+                        <div className="text-right text-sm font-semibold text-ink-900 pt-2">
+                          {formatCurrency(lineTotal)}
+                        </div>
+                      </div>
+                      <div className="col-span-12 sm:col-span-1 flex justify-end">
+                        <button
+                          onClick={() => removeItem(it.id)}
+                          className="rounded-lg p-1.5 text-ink-400 hover:bg-danger-50 hover:text-danger-600 transition"
+                          aria-label="Quitar"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                    {product && (
+                      <div className={`mt-1.5 text-xs pl-1 ${insufficient ? 'text-danger-600' : 'text-ink-500'}`}>
+                        {insufficient
+                          ? `Stock insuficiente (disponible: ${product.stock} ${product.unit})`
+                          : `Stock disponible: ${product.stock} ${product.unit}`}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {items.length === 0 && (
+                <p className="text-sm text-ink-400 text-center py-4">Agrega al menos un producto.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Notas</label>
+              <textarea
+                className="input"
+                rows={2}
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Notas internas (opcional)"
+              />
+            </div>
+            <div className="rounded-lg bg-ink-50 p-4 space-y-1.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-ink-500">Subtotal</span>
+                <span className="font-medium text-ink-800">{formatCurrency(totals.subtotal)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-ink-500">Impuesto {form.has_tax ? '(16%)' : '(0%)'}</span>
+                <span className="font-medium text-ink-800">{formatCurrency(totals.tax)}</span>
+              </div>
+              <div className="flex justify-between pt-1.5 border-t border-ink-200">
+                <span className="font-semibold text-ink-900">Total</span>
+                <span className="font-bold text-ink-900 text-base">{formatCurrency(totals.total)}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-ink-200 p-4">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.has_tax}
+                onChange={(e) => setForm({ ...form, has_tax: e.target.checked })}
+                className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-200"
+              />
+              <span className="text-sm text-ink-700">Aplicar IVA (16%)</span>
+            </label>
+            {!form.has_tax && (
+              <p className="text-xs text-ink-500 mt-1.5">La venta se registrará sin impuestos. El total será igual al subtotal.</p>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!detailOpen}
+        onClose={() => setDetailOpen(null)}
+        title={`Venta · ${detailOpen?.invoice_number ?? 'Sin folio'}`}
+        description={detailOpen?.customer?.name}
+        size="lg"
+      >
+        {detailOpen && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-ink-500 uppercase font-semibold">Fecha</p>
+                <p className="font-medium text-ink-800">{formatDate(detailOpen.sale_date)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500 uppercase font-semibold">Estado</p>
+                <Badge variant={detailOpen.status === 'confirmada' ? 'success' : 'neutral'}>{detailOpen.status}</Badge>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500 uppercase font-semibold">Subtotal</p>
+                <p className="font-medium text-ink-800">{formatCurrency(detailOpen.subtotal)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500 uppercase font-semibold">Impuesto</p>
+                <p className="font-medium text-ink-800">{formatCurrency(detailOpen.tax)}</p>
+              </div>
+            </div>
+            {detailOpen.notes && (
+              <div className="rounded-lg bg-ink-50 p-3 text-sm text-ink-600">
+                <p className="text-xs text-ink-500 uppercase font-semibold mb-1">Notas</p>
+                {detailOpen.notes}
+              </div>
+            )}
+            <div className="border border-ink-100 rounded-lg overflow-hidden">
+              <table className="min-w-full divide-y divide-ink-100">
+                <thead className="bg-ink-50/60">
+                  <tr>
+                    <th className="table-head">Producto</th>
+                    <th className="table-head text-right">Cantidad</th>
+                    <th className="table-head text-right">Precio unit.</th>
+                    <th className="table-head text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {detailItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-6 text-center text-ink-400">
+                        <Package size={20} className="mx-auto mb-2" />
+                        Sin productos
+                      </td>
+                    </tr>
+                  ) : (
+                    detailItems.map((it) => (
+                      <tr key={it.id}>
+                        <td className="table-cell font-medium text-ink-800">
+                          {it.product?.name ?? 'Producto eliminado'}
+                          <div className="text-xs text-ink-500">{it.product?.sku}</div>
+                        </td>
+                        <td className="table-cell text-right">{it.quantity}</td>
+                        <td className="table-cell text-right">{formatCurrency(it.unit_price)}</td>
+                        <td className="table-cell text-right font-semibold">{formatCurrency(it.subtotal)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-ink-50/60">
+                    <td colSpan={3} className="table-cell text-right font-semibold">
+                      Total
+                    </td>
+                    <td className="table-cell text-right font-bold text-ink-900">
+                      {formatCurrency(detailOpen.total)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!receiptSale}
+        onClose={() => setReceiptSale(null)}
+        title="Recibo de venta"
+        description="Descarga en PDF o comparte con el cliente."
+        size="md"
+        footer={
+          <div className="flex items-center justify-end gap-2 w-full">
+            <button className="btn-secondary" onClick={() => setReceiptSale(null)}>
+              Cerrar
+            </button>
+            <button className="btn-secondary" onClick={shareReceipt}>
+              <Share2 size={16} /> Compartir
+            </button>
+            <button className="btn-primary" onClick={downloadReceiptPDF}>
+              <Download size={16} /> Descargar PDF
+            </button>
+          </div>
+        }
+      >
+        <div ref={receiptRef} className="receipt-print-area">
+          <div className="flex items-start justify-between border-b border-ink-200 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-ink-900">Recibo de venta</h2>
+              <p className="text-xs text-ink-500 mt-0.5">Comprobante interno · no fiscal</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-ink-500 uppercase font-semibold">Folio</p>
+              <p className="font-mono font-bold text-ink-900">{receiptSale?.invoice_number ?? '—'}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 py-4 text-sm">
+            <div>
+              <p className="text-xs text-ink-500 uppercase font-semibold">Cliente</p>
+              <p className="font-medium text-ink-800">{receiptSale?.customer?.name ?? '—'}</p>
+              {receiptSale?.customer?.phone && (
+                <p className="text-xs text-ink-500">{receiptSale.customer.phone}</p>
+              )}
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-ink-500 uppercase font-semibold">Fecha</p>
+              <p className="font-medium text-ink-800">{formatDateTime(receiptSale?.sale_date ?? null)}</p>
+            </div>
+          </div>
+
+          <div className="border border-ink-200 rounded-lg overflow-hidden">
+            <table className="min-w-full divide-y divide-ink-100">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="table-head">Producto</th>
+                  <th className="table-head text-right">Cant.</th>
+                  <th className="table-head text-right">Precio</th>
+                  <th className="table-head text-right">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {receiptItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-ink-400">
+                      Sin productos
+                    </td>
+                  </tr>
+                ) : (
+                  receiptItems.map((it) => (
+                    <tr key={it.id}>
+                      <td className="table-cell font-medium text-ink-800">
+                        {it.product?.name ?? 'Producto eliminado'}
+                      </td>
+                      <td className="table-cell text-right">{it.quantity}</td>
+                      <td className="table-cell text-right">{formatCurrency(it.unit_price)}</td>
+                      <td className="table-cell text-right font-semibold">{formatCurrency(it.subtotal)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <div className="w-full sm:w-64 space-y-1.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-ink-500">Subtotal</span>
+                <span className="font-medium text-ink-800">{formatCurrency(receiptSale?.subtotal ?? 0)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-ink-500">Impuesto</span>
+                <span className="font-medium text-ink-800">{formatCurrency(receiptSale?.tax ?? 0)}</span>
+              </div>
+              <div className="flex justify-between pt-1.5 border-t border-ink-200">
+                <span className="font-semibold text-ink-900">Total</span>
+                <span className="font-bold text-ink-900 text-base">{formatCurrency(receiptSale?.total ?? 0)}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-ink-200 text-center">
+            <div className="inline-flex items-center gap-1.5 text-success-600 text-sm font-semibold">
+              <CheckCircle2 size={14} /> Venta confirmada
+            </div>
+            <p className="text-xs text-ink-400 mt-1">Gracias por su compra.</p>
+          </div>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Eliminar venta"
+        message="Se eliminará la venta y sus productos. El stock se revertirá automáticamente."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+    </div>
+  );
+}
