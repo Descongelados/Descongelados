@@ -127,8 +127,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = (username: string, password: string): boolean => {
     const users = loadUsers();
+    const normalUser = username.trim().toLowerCase();
     const user = users.find(
-      (u) => u.username === username && u.password === password && u.active,
+      (u) => u.username.trim().toLowerCase() === normalUser && u.password === password.trim() && u.active,
     );
     if (user) {
       setCurrentUser(user);

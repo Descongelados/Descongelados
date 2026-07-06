@@ -115,14 +115,14 @@ export default function SettingsView() {
 
     // Unique username check
     const duplicate = current.find(
-      (u) => u.username === userForm.username.trim() && u.id !== editingUser?.id,
+      (u) => u.username.toLowerCase() === userForm.username.trim().toLowerCase() && u.id !== editingUser?.id,
     );
     if (duplicate) { push('error', 'Ese nombre de usuario ya existe'); return; }
 
     if (editingUser) {
       const updated = current.map((u) =>
         u.id === editingUser.id
-          ? { ...u, name: userForm.name.trim(), username: userForm.username.trim(), password: userForm.password.trim() || u.password, roles: userForm.roles, active: userForm.active }
+          ? { ...u, name: userForm.name.trim(), username: userForm.username.trim().toLowerCase(), password: userForm.password.trim() || u.password, roles: userForm.roles, active: userForm.active }
           : u,
       );
       saveUsers(updated);
@@ -131,7 +131,7 @@ export default function SettingsView() {
       const newUser: AppUser = {
         id: Date.now().toString(),
         name: userForm.name.trim(),
-        username: userForm.username.trim(),
+        username: userForm.username.trim().toLowerCase(),
         password: userForm.password.trim(),
         roles: userForm.roles,
         active: userForm.active,
