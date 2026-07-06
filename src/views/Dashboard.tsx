@@ -54,7 +54,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         supabase.from('purchases').select('total').eq('status', 'confirmada'),
         supabase.from('collections').select('amount'),
         supabase.from('supplier_payments').select('amount'),
-        supabase.from('products').select('id, sku, name, stock, min_stock').lt('stock', 0).or('stock.lt.min_stock'),
+        supabase.from('products').select('id, sku, name, stock, min_stock').eq('is_active', true),
         supabase
           .from('sales')
           .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
@@ -62,7 +62,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .limit(5),
       ]);
 
-      if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error) {
+      if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
         setError('No se pudieron cargar las métricas');
         return;
       }
