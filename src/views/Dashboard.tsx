@@ -53,7 +53,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
   useEffect(() => {
     const load = async () => {
       setData(null);
-      const applyPeriod = (query: ReturnType<typeof supabase.from>, dateCol: string) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const applyPeriod = (query: any, dateCol: string) =>
         periodFilter ? query.gte(dateCol, periodFilter) : query;
 
       const [

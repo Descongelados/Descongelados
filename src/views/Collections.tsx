@@ -322,6 +322,7 @@ export default function Collections() {
     } else {
       push('success', 'Entrega confirmada');
       load();
+      setTab('cobranza');
     }
     setConfirmDelivery(null);
   };
@@ -532,66 +533,129 @@ export default function Collections() {
           )}
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          {loading ? (
-            <FullPageLoader />
-          ) : filteredCollections.length === 0 ? (
-            <EmptyState
-              icon={Wallet}
-              title="Sin cobranza"
-              description="Registra el primer pago desde la pestaña Entregas."
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-ink-100">
-                <thead className="bg-ink-50/60">
-                  <tr>
-                    <th className="table-head">Fecha</th>
-                    <th className="table-head">Cliente</th>
-                    <th className="table-head">Folio venta</th>
-                    <th className="table-head">Método</th>
-                    <th className="table-head">Referencia</th>
-                    <th className="table-head text-right">Monto</th>
-                    <th className="table-head text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {filteredCollections.map((c) => (
-                    <tr key={c.id} className="hover:bg-ink-50/60 transition">
-                      <td className="table-cell">{formatDate(c.collection_date)}</td>
-                      <td className="table-cell font-semibold text-ink-900">{c.customer?.name ?? '—'}</td>
-                      <td className="table-cell font-mono text-xs">{c.sale?.invoice_number ?? '—'}</td>
-                      <td className="table-cell">
-                        <Badge variant="neutral">{methodLabel(c.payment_method)}</Badge>
-                      </td>
-                      <td className="table-cell">{c.reference ?? '—'}</td>
-                      <td className="table-cell text-right font-semibold text-success-600">
-                        {formatCurrency(c.amount)}
-                      </td>
-                      <td className="table-cell text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => openEditPayment(c)}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                            aria-label="Editar"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(c)}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
-                            aria-label="Eliminar"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <div className="space-y-4">
+          {/* Ventas entregadas con saldo pendiente */}
+          {(() => {
+            const pendingPayment = deliveredSales.filter((s) => s.balance > 0.009);
+            if (pendingPayment.length === 0) return null;
+            return (
+              <div className="card overflow-hidden">
+                <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-danger-50/50">
+                  <Banknote size={16} className="text-danger-600" />
+                  <h3 className="text-sm font-semibold text-danger-700">Ventas entregadas por cobrar</h3>
+                  <span className="ml-auto rounded-full bg-danger-100 px-2 py-0.5 text-xs font-semibold text-danger-700">
+                    {pendingPayment.length}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-ink-100">
+                    <thead className="bg-ink-50/60">
+                      <tr>
+                        <th className="table-head">Folio</th>
+                        <th className="table-head">Cliente</th>
+                        <th className="table-head">Fecha</th>
+                        <th className="table-head text-right">Total</th>
+                        <th className="table-head text-right">Pagado</th>
+                        <th className="table-head text-right">Saldo</th>
+                        <th className="table-head text-right">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-ink-100">
+                      {pendingPayment.map((s) => (
+                        <tr key={s.id} className="hover:bg-ink-50/60 transition">
+                          <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
+                          <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
+                          <td className="table-cell">{formatDate(s.sale_date)}</td>
+                          <td className="table-cell text-right">{formatCurrency(s.total)}</td>
+                          <td className="table-cell text-right text-success-600">{formatCurrency(s.paid)}</td>
+                          <td className="table-cell text-right font-semibold text-danger-600">
+                            {formatCurrency(s.balance)}
+                          </td>
+                          <td className="table-cell text-right">
+                            <button
+                              onClick={() => openRegisterPayment(s)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
+                            >
+                              <Wallet size={14} /> Registrar pago
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Historial de pagos registrados */}
+          <div className="card overflow-hidden">
+            {loading ? (
+              <FullPageLoader />
+            ) : filteredCollections.length === 0 ? (
+              <EmptyState
+                icon={Wallet}
+                title="Sin cobranza registrada"
+                description="Los pagos registrados aparecerán aquí."
+              />
+            ) : (
+              <>
+                <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-ink-50/50">
+                  <Wallet size={16} className="text-ink-500" />
+                  <h3 className="text-sm font-semibold text-ink-700">Historial de pagos</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-ink-100">
+                    <thead className="bg-ink-50/60">
+                      <tr>
+                        <th className="table-head">Fecha</th>
+                        <th className="table-head">Cliente</th>
+                        <th className="table-head">Folio venta</th>
+                        <th className="table-head">Método</th>
+                        <th className="table-head">Referencia</th>
+                        <th className="table-head text-right">Monto</th>
+                        <th className="table-head text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-ink-100">
+                      {filteredCollections.map((c) => (
+                        <tr key={c.id} className="hover:bg-ink-50/60 transition">
+                          <td className="table-cell">{formatDate(c.collection_date)}</td>
+                          <td className="table-cell font-semibold text-ink-900">{c.customer?.name ?? '—'}</td>
+                          <td className="table-cell font-mono text-xs">{c.sale?.invoice_number ?? '—'}</td>
+                          <td className="table-cell">
+                            <Badge variant="neutral">{methodLabel(c.payment_method)}</Badge>
+                          </td>
+                          <td className="table-cell">{c.reference ?? '—'}</td>
+                          <td className="table-cell text-right font-semibold text-success-600">
+                            {formatCurrency(c.amount)}
+                          </td>
+                          <td className="table-cell text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => openEditPayment(c)}
+                                className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
+                                aria-label="Editar"
+                              >
+                                <Pencil size={16} />
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(c)}
+                                className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
+                                aria-label="Eliminar"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
