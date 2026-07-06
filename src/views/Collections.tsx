@@ -10,6 +10,7 @@ import {
   Layers,
   CheckCircle2,
   PackageCheck,
+  AlertCircle,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Collection, Customer, Sale } from '../lib/types';
@@ -65,7 +66,7 @@ const emptyPaymentForm = (): PaymentForm => ({
 
 export default function Collections() {
   const { push } = useToast();
-  const [tab, setTab] = useState<'entregas' | 'cobranza'>('entregas');
+  const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas'>('entregas');
   const [sales, setSales] = useState<SaleRow[] | null>(null);
   const [collections, setCollections] = useState<CollectionRow[] | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -142,6 +143,18 @@ export default function Collections() {
   const deliveredSales = useMemo(
     () => salesWithBalance.filter((s) => s.delivery_status === 'entregado'),
     [salesWithBalance],
+  );
+
+  // entregadas con saldo pendiente → acción requerida en Cobranza
+  const pendingPaymentSales = useMemo(
+    () => deliveredSales.filter((s) => s.balance > 0.009),
+    [deliveredSales],
+  );
+
+  // entregadas y totalmente pagadas → pestaña Ventas cobradas
+  const paidSales = useMemo(
+    () => deliveredSales.filter((s) => s.balance <= 0.009),
+    [deliveredSales],
   );
 
   const filteredDeliveries = useMemo(() => {
@@ -413,15 +426,35 @@ export default function Collections() {
         </button>
         <button
           onClick={() => setTab('cobranza')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
+          className={`relative flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
             tab === 'cobranza'
               ? 'border-brand-600 text-brand-700'
               : 'border-transparent text-ink-500 hover:text-ink-700'
           }`}
         >
           <Wallet size={16} /> Cobranza
+          {pendingPaymentSales.length > 0 ? (
+            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-danger-500 px-2 py-0.5 text-xs font-semibold text-white">
+              <AlertCircle size={10} />
+              {pendingPaymentSales.length}
+            </span>
+          ) : (
+            <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
+              {collections?.length ?? 0}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setTab('cobradas')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
+            tab === 'cobradas'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-ink-500 hover:text-ink-700'
+          }`}
+        >
+          <CheckCircle2 size={16} /> Ventas cobradas
           <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
-            {collections?.length ?? 0}
+            {paidSales.length}
           </span>
         </button>
       </div>
@@ -532,61 +565,57 @@ export default function Collections() {
             </div>
           )}
         </div>
-      ) : (
+      ) : tab === 'cobranza' ? (
         <div className="space-y-4">
-          {/* Ventas entregadas con saldo pendiente */}
-          {(() => {
-            const pendingPayment = deliveredSales.filter((s) => s.balance > 0.009);
-            if (pendingPayment.length === 0) return null;
-            return (
-              <div className="card overflow-hidden">
-                <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-danger-50/50">
-                  <Banknote size={16} className="text-danger-600" />
-                  <h3 className="text-sm font-semibold text-danger-700">Ventas entregadas por cobrar</h3>
-                  <span className="ml-auto rounded-full bg-danger-100 px-2 py-0.5 text-xs font-semibold text-danger-700">
-                    {pendingPayment.length}
-                  </span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-ink-100">
-                    <thead className="bg-ink-50/60">
-                      <tr>
-                        <th className="table-head">Folio</th>
-                        <th className="table-head">Cliente</th>
-                        <th className="table-head">Fecha</th>
-                        <th className="table-head text-right">Total</th>
-                        <th className="table-head text-right">Pagado</th>
-                        <th className="table-head text-right">Saldo</th>
-                        <th className="table-head text-right">Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-ink-100">
-                      {pendingPayment.map((s) => (
-                        <tr key={s.id} className="hover:bg-ink-50/60 transition">
-                          <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
-                          <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
-                          <td className="table-cell">{formatDate(s.sale_date)}</td>
-                          <td className="table-cell text-right">{formatCurrency(s.total)}</td>
-                          <td className="table-cell text-right text-success-600">{formatCurrency(s.paid)}</td>
-                          <td className="table-cell text-right font-semibold text-danger-600">
-                            {formatCurrency(s.balance)}
-                          </td>
-                          <td className="table-cell text-right">
-                            <button
-                              onClick={() => openRegisterPayment(s)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
-                            >
-                              <Wallet size={14} /> Registrar pago
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+          {/* Ventas entregadas con saldo pendiente — requieren acción */}
+          {pendingPaymentSales.length > 0 && (
+            <div className="card overflow-hidden border-danger-200">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-danger-100 bg-danger-50">
+                <AlertCircle size={16} className="text-danger-600" />
+                <h3 className="text-sm font-semibold text-danger-700">Requieren acción · Por cobrar</h3>
+                <span className="ml-auto rounded-full bg-danger-500 px-2 py-0.5 text-xs font-semibold text-white">
+                  {pendingPaymentSales.length}
+                </span>
               </div>
-            );
-          })()}
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-danger-100">
+                  <thead className="bg-danger-50/40">
+                    <tr>
+                      <th className="table-head">Folio</th>
+                      <th className="table-head">Cliente</th>
+                      <th className="table-head">Fecha</th>
+                      <th className="table-head text-right">Total</th>
+                      <th className="table-head text-right">Pagado</th>
+                      <th className="table-head text-right">Saldo pendiente</th>
+                      <th className="table-head text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-danger-100">
+                    {pendingPaymentSales.map((s) => (
+                      <tr key={s.id} className="hover:bg-danger-50/30 transition">
+                        <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
+                        <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
+                        <td className="table-cell">{formatDate(s.sale_date)}</td>
+                        <td className="table-cell text-right">{formatCurrency(s.total)}</td>
+                        <td className="table-cell text-right text-success-600">{formatCurrency(s.paid)}</td>
+                        <td className="table-cell text-right font-bold text-danger-600">
+                          {formatCurrency(s.balance)}
+                        </td>
+                        <td className="table-cell text-right">
+                          <button
+                            onClick={() => openRegisterPayment(s)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
+                          >
+                            <Wallet size={14} /> Registrar pago
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Historial de pagos registrados */}
           <div className="card overflow-hidden">
@@ -656,6 +685,52 @@ export default function Collections() {
               </>
             )}
           </div>
+        </div>
+      ) : (
+        /* ── Pestaña: Ventas cobradas ── */
+        <div className="card overflow-hidden">
+          {loading ? (
+            <FullPageLoader />
+          ) : paidSales.length === 0 ? (
+            <EmptyState
+              icon={CheckCircle2}
+              title="Sin ventas cobradas aún"
+              description="Las ventas entregadas y completamente pagadas aparecerán aquí."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-ink-100">
+                <thead className="bg-ink-50/60">
+                  <tr>
+                    <th className="table-head">Folio</th>
+                    <th className="table-head">Cliente</th>
+                    <th className="table-head">Fecha</th>
+                    <th className="table-head text-right">Total</th>
+                    <th className="table-head text-right">Total cobrado</th>
+                    <th className="table-head">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {paidSales.map((s) => (
+                    <tr key={s.id} className="hover:bg-ink-50/60 transition">
+                      <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
+                      <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
+                      <td className="table-cell">{formatDate(s.sale_date)}</td>
+                      <td className="table-cell text-right">{formatCurrency(s.total)}</td>
+                      <td className="table-cell text-right font-semibold text-success-600">
+                        {formatCurrency(s.paid)}
+                      </td>
+                      <td className="table-cell">
+                        <Badge variant="success">
+                          <CheckCircle2 size={12} /> Cobrada
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
