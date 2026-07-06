@@ -37,38 +37,38 @@ type DashboardData = {
   lowStockProducts: Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
 };
 
-/** Returns ISO date strings for Monday and Friday of the current week (Mon–Fri). */
-function currentWeekRange(): { monday: string; friday: string; label: string } {
+/** Returns ISO date strings for Monday and Sunday of the current week (Mon–Sun). */
+function currentWeekRange(): { monday: string; sunday: string; label: string } {
   const now = new Date();
   const day = now.getDay(); // 0 Sun … 6 Sat
-  // Days since last Monday (treat Sunday as day 7 so it looks ahead to next Monday)
+  // Days back to Monday (Sunday counts as end of previous week → -6)
   const diffToMonday = day === 0 ? -6 : 1 - day;
   const monday = new Date(now);
   monday.setDate(now.getDate() + diffToMonday);
-  const friday = new Date(monday);
-  friday.setDate(monday.getDate() + 4);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
 
   const fmt = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   const labelFmt = new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'short' });
-  const label = `${labelFmt.format(monday)} – ${labelFmt.format(friday)}`;
+  const label = `${labelFmt.format(monday)} – ${labelFmt.format(sunday)}`;
 
-  return { monday: fmt(monday), friday: fmt(friday), label };
+  return { monday: fmt(monday), sunday: fmt(sunday), label };
 }
 
 export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { monday, friday, label: weekLabel } = currentWeekRange();
+  const { monday, sunday, label: weekLabel } = currentWeekRange();
 
   useEffect(() => {
     const load = async () => {
       setData(null);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const applyWeek = (query: any, dateCol: string) =>
-        query.gte(dateCol, monday).lte(dateCol, `${friday}T23:59:59`);
+        query.gte(dateCol, monday).lte(dateCol, `${sunday}T23:59:59`);
 
       const [
         salesRes,
@@ -87,7 +87,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .from('sales')
           .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
           .gte('sale_date', monday)
-          .lte('sale_date', `${friday}T23:59:59`)
+          .lte('sale_date', `${sunday}T23:59:59`)
           .order('sale_date', { ascending: false })
           .limit(10),
       ]);
