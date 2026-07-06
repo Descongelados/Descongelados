@@ -14,8 +14,16 @@ import Reports from './views/Reports';
 import Settings from './views/Settings';
 
 function AppShell() {
-  const { currentUser } = useAuth();
+  const { currentUser, authLoading } = useAuth();
   const [view, setView] = useState<ViewKey>('dashboard');
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-ink-50 flex items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-200 border-t-brand-600" />
+      </div>
+    );
+  }
 
   if (!currentUser) return <LoginScreen />;
 

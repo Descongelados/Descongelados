@@ -12,15 +12,18 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    setTimeout(() => {
-      const ok = login(username.trim(), password);
+    try {
+      const ok = await login(username.trim(), password);
       if (!ok) setError('Usuario o contraseña incorrectos');
+    } catch {
+      setError('Error de conexión. Intenta de nuevo.');
+    } finally {
       setLoading(false);
-    }, 200);
+    }
   };
 
   return (

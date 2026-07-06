@@ -16,11 +16,10 @@ import {
 import {
   AppUser,
   CompanyInfo,
-  loadUsers,
-  saveUsers,
   loadCompany,
   saveCompany,
 } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 import { Role, ROLE_LABELS, ROLE_DESCRIPTIONS, ROLE_COLORS } from '../lib/permissions';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
@@ -73,16 +72,21 @@ export default function SettingsView() {
   };
 
   // ── Users ─────────────────────────────────────────────────────────────────
-  const [users, setUsers] = useState<AppUser[]>(loadUsers);
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [userModal, setUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [userForm, setUserForm] = useState<UserForm>(emptyUserForm());
   const [showPassword, setShowPassword] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
 
-  useEffect(() => { setUsers(loadUsers()); }, []);
+  const refreshUsers = async () => {
+    const { data } = await supabase.from('app_users').select('*').order('created_at');
+    setUsers((data ?? []).map((u) => ({ ...u, roles: u.roles as Role[] })));
+    setUsersLoading(false);
+  };
 
-  const refreshUsers = () => { const u = loadUsers(); setUsers(u); };
+  useEffect(() => { refreshUsers(); }, []);
 
   const openCreateUser = () => {
     setEditingUser(null);
@@ -105,60 +109,61 @@ export default function SettingsView() {
     }));
   };
 
-  const saveUser = () => {
+  const saveUser = async () => {
     if (!userForm.name.trim()) { push('error', 'El nombre es obligatorio'); return; }
     if (!userForm.username.trim()) { push('error', 'El usuario es obligatorio'); return; }
     if (!editingUser && !userForm.password.trim()) { push('error', 'La contraseña es obligatoria'); return; }
     if (userForm.roles.length === 0) { push('error', 'Asigna al menos un rol'); return; }
 
-    const current = loadUsers();
+    const normalUsername = userForm.username.trim().toLowerCase();
 
     // Unique username check
-    const duplicate = current.find(
-      (u) => u.username.toLowerCase() === userForm.username.trim().toLowerCase() && u.id !== editingUser?.id,
+    const duplicate = users.find(
+      (u) => u.username.toLowerCase() === normalUsername && u.id !== editingUser?.id,
     );
     if (duplicate) { push('error', 'Ese nombre de usuario ya existe'); return; }
 
     if (editingUser) {
-      const updated = current.map((u) =>
-        u.id === editingUser.id
-          ? { ...u, name: userForm.name.trim(), username: userForm.username.trim().toLowerCase(), password: userForm.password.trim() || u.password, roles: userForm.roles, active: userForm.active }
-          : u,
-      );
-      saveUsers(updated);
+      const { error } = await supabase.from('app_users').update({
+        name: userForm.name.trim(),
+        username: normalUsername,
+        password: userForm.password.trim() || editingUser.password,
+        roles: userForm.roles,
+        active: userForm.active,
+      }).eq('id', editingUser.id);
+      if (error) { push('error', 'Error al actualizar usuario'); return; }
       push('success', 'Usuario actualizado');
     } else {
-      const newUser: AppUser = {
+      const { error } = await supabase.from('app_users').insert({
         id: Date.now().toString(),
         name: userForm.name.trim(),
-        username: userForm.username.trim().toLowerCase(),
+        username: normalUsername,
         password: userForm.password.trim(),
         roles: userForm.roles,
         active: userForm.active,
         created_at: new Date().toISOString(),
-      };
-      saveUsers([...current, newUser]);
+      });
+      if (error) { push('error', 'Error al crear usuario'); return; }
       push('success', 'Usuario creado');
     }
     setUserModal(false);
-    refreshUsers();
+    await refreshUsers();
   };
 
-  const confirmDeleteUser = () => {
+  const confirmDeleteUser = async () => {
     if (!deleteTarget) return;
     if (deleteTarget.id === currentUser?.id) { push('error', 'No puedes eliminar tu propio usuario'); setDeleteTarget(null); return; }
-    const updated = loadUsers().filter((u) => u.id !== deleteTarget.id);
-    saveUsers(updated);
-    push('success', 'Usuario eliminado');
+    const { error } = await supabase.from('app_users').delete().eq('id', deleteTarget.id);
+    if (error) { push('error', 'Error al eliminar usuario'); }
+    else push('success', 'Usuario eliminado');
     setDeleteTarget(null);
-    refreshUsers();
+    await refreshUsers();
   };
 
-  const toggleActive = (u: AppUser) => {
+  const toggleActive = async (u: AppUser) => {
     if (u.id === currentUser?.id) { push('error', 'No puedes desactivarte a ti mismo'); return; }
-    const updated = loadUsers().map((x) => x.id === u.id ? { ...x, active: !x.active } : x);
-    saveUsers(updated);
-    refreshUsers();
+    await supabase.from('app_users').update({ active: !u.active }).eq('id', u.id);
+    await refreshUsers();
   };
 
   return (
@@ -270,54 +275,58 @@ export default function SettingsView() {
               <h3 className="text-sm font-semibold text-ink-700 flex items-center gap-2"><Users size={15} /> Usuarios del sistema</h3>
               <button className="btn-primary text-xs" onClick={openCreateUser}><Plus size={14} /> Nuevo usuario</button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-ink-100">
-                <thead className="bg-ink-50/60">
-                  <tr>
-                    <th className="table-head">Usuario</th>
-                    <th className="table-head">Nombre</th>
-                    <th className="table-head">Roles</th>
-                    <th className="table-head">Estado</th>
-                    <th className="table-head text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {users.map((u) => (
-                    <tr key={u.id} className="hover:bg-ink-50/60 transition">
-                      <td className="table-cell font-mono text-xs font-semibold text-ink-800">{u.username}</td>
-                      <td className="table-cell font-semibold text-ink-900">{u.name}</td>
-                      <td className="table-cell">
-                        <div className="flex flex-wrap gap-1">
-                          {u.roles.map((r) => (
-                            <span key={r} className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}>
-                              {ROLE_LABELS[r]}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="table-cell">
-                        <button
-                          onClick={() => toggleActive(u)}
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold transition ${u.active ? 'bg-success-100 text-success-700 hover:bg-success-200' : 'bg-ink-100 text-ink-500 hover:bg-ink-200'}`}
-                        >
-                          {u.active ? 'Activo' : 'Inactivo'}
-                        </button>
-                      </td>
-                      <td className="table-cell text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => openEditUser(u)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Editar">
-                            <Pencil size={15} />
-                          </button>
-                          <button onClick={() => setDeleteTarget(u)} disabled={u.id === currentUser?.id} className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition disabled:opacity-30" aria-label="Eliminar">
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </td>
+            {usersLoading ? (
+              <div className="py-10 text-center text-sm text-ink-400">Cargando usuarios…</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-ink-100">
+                  <thead className="bg-ink-50/60">
+                    <tr>
+                      <th className="table-head">Usuario</th>
+                      <th className="table-head">Nombre</th>
+                      <th className="table-head">Roles</th>
+                      <th className="table-head">Estado</th>
+                      <th className="table-head text-right">Acciones</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {users.map((u) => (
+                      <tr key={u.id} className="hover:bg-ink-50/60 transition">
+                        <td className="table-cell font-mono text-xs font-semibold text-ink-800">{u.username}</td>
+                        <td className="table-cell font-semibold text-ink-900">{u.name}</td>
+                        <td className="table-cell">
+                          <div className="flex flex-wrap gap-1">
+                            {u.roles.map((r) => (
+                              <span key={r} className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${ROLE_COLORS[r]}`}>
+                                {ROLE_LABELS[r]}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="table-cell">
+                          <button
+                            onClick={() => toggleActive(u)}
+                            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold transition ${u.active ? 'bg-success-100 text-success-700 hover:bg-success-200' : 'bg-ink-100 text-ink-500 hover:bg-ink-200'}`}
+                          >
+                            {u.active ? 'Activo' : 'Inactivo'}
+                          </button>
+                        </td>
+                        <td className="table-cell text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => openEditUser(u)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Editar">
+                              <Pencil size={15} />
+                            </button>
+                            <button onClick={() => setDeleteTarget(u)} disabled={u.id === currentUser?.id} className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition disabled:opacity-30" aria-label="Eliminar">
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
