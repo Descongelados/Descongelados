@@ -8,6 +8,7 @@ import Sales from './views/Sales';
 import Customers from './views/Customers';
 import Suppliers from './views/Suppliers';
 import Collections from './views/Collections';
+import Reports from './views/Reports';
 
 function App() {
   const [view, setView] = useState<ViewKey>('dashboard');
@@ -25,6 +26,7 @@ function App() {
             {view === 'customers' && <Customers />}
             {view === 'suppliers' && <Suppliers />}
             {view === 'collections' && <Collections />}
+            {view === 'reports' && <Reports />}
           </div>
         </main>
       </div>

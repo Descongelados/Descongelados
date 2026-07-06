@@ -9,6 +9,7 @@ import {
   Boxes,
   Menu,
   X,
+  BarChart2,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -19,7 +20,8 @@ export type ViewKey =
   | 'sales'
   | 'customers'
   | 'suppliers'
-  | 'collections';
+  | 'collections'
+  | 'reports';
 
 type NavItem = {
   key: ViewKey;
@@ -36,6 +38,7 @@ const navItems: NavItem[] = [
   { key: 'customers', label: 'Clientes', icon: Users, description: 'Cartera y saldos' },
   { key: 'suppliers', label: 'Proveedores', icon: Building2, description: 'Cuentas por pagar' },
   { key: 'collections', label: 'Entrega&Cobranza', icon: Truck, description: 'Entregas y pagos de clientes' },
+  { key: 'reports', label: 'Reportes', icon: BarChart2, description: 'Análisis y exportación' },
 ];
 
 type SidebarProps = {
