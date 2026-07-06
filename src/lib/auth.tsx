@@ -52,7 +52,16 @@ const DEFAULT_COMPANY: CompanyInfo = {
 export function loadUsers(): AppUser[] {
   try {
     const raw = localStorage.getItem(USERS_KEY);
-    return raw ? JSON.parse(raw) : [DEFAULT_ADMIN];
+    if (!raw) return [DEFAULT_ADMIN];
+    const users: AppUser[] = JSON.parse(raw);
+    // Ensure the default admin always exists so first-time login always works
+    const hasAdmin = users.some((u) => u.id === DEFAULT_ADMIN.id);
+    if (!hasAdmin) {
+      const merged = [DEFAULT_ADMIN, ...users];
+      localStorage.setItem(USERS_KEY, JSON.stringify(merged));
+      return merged;
+    }
+    return users;
   } catch {
     return [DEFAULT_ADMIN];
   }
