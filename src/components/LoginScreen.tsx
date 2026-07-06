@@ -92,9 +92,6 @@ export default function LoginScreen() {
             </button>
           </form>
 
-          <p className="text-center text-xs text-ink-400 mt-4">
-            Usuario por defecto: <span className="font-mono font-semibold">admin</span> / <span className="font-mono font-semibold">admin123</span>
-          </p>
         </div>
       </div>
     </div>
