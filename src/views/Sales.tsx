@@ -22,6 +22,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
 import SaleReceiptModal from '../components/ui/SaleReceiptModal';
+import { useAuth } from '../lib/auth';
 
 type SaleRow = Sale & { customer: Customer | null };
 type ItemRow = {
@@ -46,6 +47,10 @@ const generateInvoiceNumber = (existing: SaleRow[]): string => {
 };
 
 export default function Sales() {
+  const { can } = useAuth();
+  const canCreate = can('sales:create');
+  const canEdit   = can('sales:edit');
+  const canDelete = can('sales:delete');
   const { push } = useToast();
   const [sales, setSales] = useState<SaleRow[] | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -272,9 +277,11 @@ export default function Sales() {
         title="Ventas"
         description="Facturas a clientes"
         actions={
-          <button className="btn-primary" onClick={openCreate} disabled={customers.length === 0 || products.length === 0}>
-            <Plus size={16} /> Nueva venta
-          </button>
+          canCreate && (
+            <button className="btn-primary" onClick={openCreate} disabled={customers.length === 0 || products.length === 0}>
+              <Plus size={16} /> Nueva venta
+            </button>
+          )
         }
       />
 
@@ -359,20 +366,16 @@ export default function Sales() {
                         >
                           <Eye size={16} />
                         </button>
-                        <button
-                          onClick={() => openEdit(s)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                          aria-label="Editar"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteTarget(s)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
-                          aria-label="Eliminar"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {canEdit && (
+                          <button onClick={() => openEdit(s)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Editar">
+                            <Pencil size={16} />
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button onClick={() => setDeleteTarget(s)} className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition" aria-label="Eliminar">
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

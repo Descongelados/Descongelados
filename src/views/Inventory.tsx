@@ -10,6 +10,7 @@ import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
+import { useAuth } from '../lib/auth';
 
 type FormState = {
   sku: string;
@@ -38,6 +39,11 @@ const emptyForm: FormState = {
 };
 
 export default function Inventory() {
+  const { can } = useAuth();
+  const canCreate = can('inventory:create');
+  const canEdit   = can('inventory:edit');
+  const canDelete = can('inventory:delete');
+
   const { push } = useToast();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -200,11 +206,11 @@ export default function Inventory() {
       <PageHeader
         title="Inventario"
         description="Administra productos, precios y existencias"
-        actions={
+        actions={canCreate && (
           <button className="btn-primary" onClick={openCreate}>
             <Plus size={16} /> Nuevo producto
           </button>
-        }
+        )}
       />
 
       <div className="card p-4 mb-4">
@@ -320,20 +326,16 @@ export default function Inventory() {
                       </td>
                       <td className="table-cell text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                            aria-label="Editar"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(p)}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
-                            aria-label="Eliminar"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {canEdit && (
+                            <button onClick={() => openEdit(p)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Editar">
+                              <Pencil size={16} />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button onClick={() => setDeleteTarget(p)} className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition" aria-label="Eliminar">
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

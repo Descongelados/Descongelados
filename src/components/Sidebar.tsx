@@ -10,8 +10,11 @@ import {
   Menu,
   X,
   BarChart2,
+  Settings,
+  LogOut,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../lib/auth';
 
 export type ViewKey =
   | 'dashboard'
@@ -21,7 +24,8 @@ export type ViewKey =
   | 'customers'
   | 'suppliers'
   | 'collections'
-  | 'reports';
+  | 'reports'
+  | 'settings';
 
 type NavItem = {
   key: ViewKey;
@@ -39,6 +43,7 @@ const navItems: NavItem[] = [
   { key: 'suppliers', label: 'Proveedores', icon: Building2, description: 'Cuentas por pagar' },
   { key: 'collections', label: 'Entrega&Cobranza', icon: Truck, description: 'Entregas y pagos de clientes' },
   { key: 'reports', label: 'Reportes', icon: BarChart2, description: 'Análisis y exportación' },
+  { key: 'settings', label: 'Configuración', icon: Settings, description: 'Empresa, usuarios y roles' },
 ];
 
 type SidebarProps = {
@@ -47,6 +52,7 @@ type SidebarProps = {
 };
 
 export default function Sidebar({ current, onNavigate }: SidebarProps) {
+  const { currentUser, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleNavigate = (view: ViewKey) => {
@@ -116,9 +122,27 @@ export default function Sidebar({ current, onNavigate }: SidebarProps) {
           })}
         </nav>
 
-        <div className="px-5 py-4 border-t border-white/10">
-          <p className="text-[11px] text-ink-500">Versión 1.0</p>
-          <p className="text-xs text-ink-400 mt-0.5">© 2026 NexoComercio</p>
+        <div className="px-4 py-4 border-t border-white/10 space-y-2">
+          {currentUser && (
+            <div className="flex items-center gap-2 px-1 py-1">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-500 text-white text-xs font-bold">
+                {currentUser.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-white truncate">{currentUser.name}</p>
+                <p className="text-[10px] text-ink-400 truncate">{currentUser.roles.map(r => r).join(', ')}</p>
+              </div>
+              <button
+                onClick={logout}
+                className="rounded-lg p-1.5 text-ink-400 hover:bg-white/10 hover:text-white transition"
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
+          )}
+          <p className="text-[11px] text-ink-500 px-1">© 2026 NexoComercio</p>
         </div>
       </aside>
     </>

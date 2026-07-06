@@ -24,6 +24,7 @@ import EmptyState from '../components/ui/EmptyState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
+import { useAuth } from '../lib/auth';
 
 type PurchaseRow = Purchase & { supplier: Supplier | null };
 type ItemRow = {
@@ -71,6 +72,11 @@ const emptySupPayForm = (): SupPayForm => ({
 });
 
 export default function Purchases() {
+  const { can } = useAuth();
+  const canCreate = can('purchases:create');
+  const canEdit   = can('purchases:edit');
+  const canDelete = can('purchases:delete');
+
   const { push } = useToast();
   const [tab, setTab] = useState<'compras' | 'pagos'>('compras');
 
@@ -494,7 +500,7 @@ export default function Purchases() {
         description="Órdenes de compra y pagos a proveedores"
         actions={
           tab === 'compras' ? (
-            <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
+            canCreate && <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
               <Plus size={16} /> Nueva compra
             </button>
           ) : (
@@ -695,20 +701,16 @@ export default function Purchases() {
                             >
                               <Eye size={16} />
                             </button>
-                            <button
-                              onClick={() => openEdit(p)}
-                              className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                              aria-label="Editar"
-                            >
-                              <Pencil size={16} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteTarget(p)}
-                              className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
-                              aria-label="Eliminar"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            {canEdit && (
+                              <button onClick={() => openEdit(p)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Editar">
+                                <Pencil size={16} />
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button onClick={() => setDeleteTarget(p)} className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition" aria-label="Eliminar">
+                                <Trash2 size={16} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

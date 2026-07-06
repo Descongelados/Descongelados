@@ -22,6 +22,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
 import SaleReceiptModal from '../components/ui/SaleReceiptModal';
+import { useAuth } from '../lib/auth';
 
 type SaleRow = Sale & { customer: Customer | null };
 type CollectionRow = Collection & {
@@ -63,6 +64,8 @@ const emptyPaymentForm = (): PaymentForm => ({
 });
 
 export default function Collections() {
+  const { can } = useAuth();
+  const canEdit = can('collections:edit');
   const { push } = useToast();
   const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas'>('entregas');
   const [sales, setSales] = useState<SaleRow[] | null>(null);
@@ -504,7 +507,7 @@ export default function Collections() {
                       </td>
                       <td className="table-cell text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {s.delivery_status === 'pendiente' && (
+                          {canEdit && s.delivery_status === 'pendiente' && (
                             <button
                               onClick={() => setConfirmDelivery(s)}
                               className="inline-flex items-center gap-1 rounded-lg bg-success-50 px-2.5 py-1.5 text-xs font-semibold text-success-700 hover:bg-success-100 transition"
@@ -512,12 +515,14 @@ export default function Collections() {
                               <CheckCircle2 size={14} /> Confirmar entrega
                             </button>
                           )}
+                          {canEdit && (
                           <button
                             onClick={() => openRegisterPayment(s)}
                             className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
                           >
                             <Wallet size={14} /> Registrar pago
                           </button>
+                          )}
                           <button
                             onClick={() => setReceiptSale(s)}
                             className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
@@ -573,12 +578,14 @@ export default function Collections() {
                         </td>
                         <td className="table-cell text-right">
                           <div className="flex items-center justify-end gap-1">
+                            {canEdit && (
                             <button
                               onClick={() => openRegisterPayment(s)}
                               className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
                             >
                               <Wallet size={14} /> Registrar pago
                             </button>
+                            )}
                             <button
                               onClick={() => setReceiptSale(s)}
                               className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
