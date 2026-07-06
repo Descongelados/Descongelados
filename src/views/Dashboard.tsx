@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   DollarSign,
   ShoppingCart,
@@ -37,25 +37,38 @@ type DashboardData = {
   lowStockProducts: Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
 };
 
+/** Returns ISO date strings for Monday and Friday of the current week (Mon–Fri). */
+function currentWeekRange(): { monday: string; friday: string; label: string } {
+  const now = new Date();
+  const day = now.getDay(); // 0 Sun … 6 Sat
+  // Days since last Monday (treat Sunday as day 7 so it looks ahead to next Monday)
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMonday);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const labelFmt = new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'short' });
+  const label = `${labelFmt.format(monday)} – ${labelFmt.format(friday)}`;
+
+  return { monday: fmt(monday), friday: fmt(friday), label };
+}
+
 export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState<'month' | 'all'>('month');
 
-  const periodLabel = period === 'month' ? 'Este mes' : 'Todo el tiempo';
-
-  const periodFilter = useMemo(() => {
-    if (period === 'all') return null;
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  }, [period]);
+  const { monday, friday, label: weekLabel } = currentWeekRange();
 
   useEffect(() => {
     const load = async () => {
       setData(null);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const applyPeriod = (query: any, dateCol: string) =>
-        periodFilter ? query.gte(dateCol, periodFilter) : query;
+      const applyWeek = (query: any, dateCol: string) =>
+        query.gte(dateCol, monday).lte(dateCol, `${friday}T23:59:59`);
 
       const [
         salesRes,
@@ -65,16 +78,18 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         lowStockRes,
         recentSalesRes,
       ] = await Promise.all([
-        applyPeriod(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
-        applyPeriod(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
-        applyPeriod(supabase.from('collections').select('amount'), 'collection_date'),
-        applyPeriod(supabase.from('supplier_payments').select('amount'), 'payment_date'),
+        applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
+        applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
+        applyWeek(supabase.from('collections').select('amount'), 'collection_date'),
+        applyWeek(supabase.from('supplier_payments').select('amount'), 'payment_date'),
         supabase.from('products').select('id, sku, name, stock, min_stock').eq('is_active', true),
         supabase
           .from('sales')
           .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
+          .gte('sale_date', monday)
+          .lte('sale_date', `${friday}T23:59:59`)
           .order('sale_date', { ascending: false })
-          .limit(5),
+          .limit(10),
       ]);
 
       if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
@@ -105,7 +120,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       });
     };
     load();
-  }, [period, periodFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (error) return <EmptyState icon={AlertTriangle} title={error} description="Revisa la conexión e inténtalo de nuevo." />;
 
@@ -115,28 +131,10 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         title="Panel de control"
         description="Resumen general de tu operación comercial"
         actions={
-          <div className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white p-1 shadow-sm">
-            <Calendar size={14} className="ml-2 text-ink-400 hidden sm:block" />
-            <button
-              onClick={() => setPeriod('month')}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                period === 'month'
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'text-ink-500 hover:text-ink-700'
-              }`}
-            >
-              Este mes
-            </button>
-            <button
-              onClick={() => setPeriod('all')}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                period === 'all'
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'text-ink-500 hover:text-ink-700'
-              }`}
-            >
-              Todo
-            </button>
+          <div className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-2 shadow-sm text-xs text-ink-600">
+            <Calendar size={14} className="text-brand-500" />
+            <span className="font-semibold text-ink-800">{weekLabel}</span>
+            <span className="text-ink-400">· semana actual</span>
           </div>
         }
       />
@@ -151,28 +149,28 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               value={formatCurrency(data.totalSales)}
               icon={TrendingUp}
               tone="success"
-              hint={`Facturas confirmadas · ${periodLabel}`}
+              hint="Facturas confirmadas · esta semana"
             />
             <StatCard
               label="Compras totales"
               value={formatCurrency(data.totalPurchases)}
               icon={ShoppingCart}
               tone="brand"
-              hint={`Órdenes a proveedores · ${periodLabel}`}
+              hint="Órdenes a proveedores · esta semana"
             />
             <StatCard
               label="Por cobrar"
               value={formatCurrency(data.totalToCollect)}
               icon={Wallet}
               tone="accent"
-              hint={`Saldo pendiente clientes · ${periodLabel}`}
+              hint="Saldo pendiente clientes · esta semana"
             />
             <StatCard
               label="Por pagar"
               value={formatCurrency(data.totalToPay)}
               icon={DollarSign}
               tone="warning"
-              hint={`Saldo pendiente proveedores · ${periodLabel}`}
+              hint="Saldo pendiente proveedores · esta semana"
             />
           </div>
 
@@ -189,7 +187,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               value={formatCurrency(data.totalCollected)}
               icon={Wallet}
               tone="success"
-              hint={`Pagos registrados · ${periodLabel}`}
+              hint="Pagos registrados · esta semana"
             />
           </div>
 
