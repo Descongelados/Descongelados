@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   DollarSign,
   ShoppingCart,
@@ -8,6 +8,7 @@ import {
   Wallet,
   ArrowRight,
   Clock,
+  Calendar,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate, formatNumber } from '../lib/format';
@@ -39,9 +40,22 @@ type DashboardData = {
 export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<'month' | 'all'>('month');
+
+  const periodLabel = period === 'month' ? 'Este mes' : 'Todo el tiempo';
+
+  const periodFilter = useMemo(() => {
+    if (period === 'all') return null;
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  }, [period]);
 
   useEffect(() => {
     const load = async () => {
+      setData(null);
+      const applyPeriod = (query: ReturnType<typeof supabase.from>, dateCol: string) =>
+        periodFilter ? query.gte(dateCol, periodFilter) : query;
+
       const [
         salesRes,
         purchasesRes,
@@ -50,10 +64,10 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         lowStockRes,
         recentSalesRes,
       ] = await Promise.all([
-        supabase.from('sales').select('total').eq('status', 'confirmada'),
-        supabase.from('purchases').select('total').eq('status', 'confirmada'),
-        supabase.from('collections').select('amount'),
-        supabase.from('supplier_payments').select('amount'),
+        applyPeriod(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
+        applyPeriod(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
+        applyPeriod(supabase.from('collections').select('amount'), 'collection_date'),
+        applyPeriod(supabase.from('supplier_payments').select('amount'), 'payment_date'),
         supabase.from('products').select('id, sku, name, stock, min_stock').eq('is_active', true),
         supabase
           .from('sales')
@@ -90,148 +104,178 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       });
     };
     load();
-  }, []);
+  }, [period, periodFilter]);
 
   if (error) return <EmptyState icon={AlertTriangle} title={error} description="Revisa la conexión e inténtalo de nuevo." />;
-  if (!data) return <FullPageLoader label="Cargando panel…" />;
 
   return (
     <div className="animate-fade-in">
       <PageHeader
         title="Panel de control"
         description="Resumen general de tu operación comercial"
+        actions={
+          <div className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white p-1 shadow-sm">
+            <Calendar size={14} className="ml-2 text-ink-400 hidden sm:block" />
+            <button
+              onClick={() => setPeriod('month')}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                period === 'month'
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-ink-500 hover:text-ink-700'
+              }`}
+            >
+              Este mes
+            </button>
+            <button
+              onClick={() => setPeriod('all')}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                period === 'all'
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-ink-500 hover:text-ink-700'
+              }`}
+            >
+              Todo
+            </button>
+          </div>
+        }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        <StatCard
-          label="Ventas totales"
-          value={formatCurrency(data.totalSales)}
-          icon={TrendingUp}
-          tone="success"
-          hint="Facturas confirmadas"
-        />
-        <StatCard
-          label="Compras totales"
-          value={formatCurrency(data.totalPurchases)}
-          icon={ShoppingCart}
-          tone="brand"
-          hint="Órdenes a proveedores"
-        />
-        <StatCard
-          label="Por cobrar"
-          value={formatCurrency(data.totalToCollect)}
-          icon={Wallet}
-          tone="accent"
-          hint="Saldo pendiente de clientes"
-        />
-        <StatCard
-          label="Por pagar"
-          value={formatCurrency(data.totalToPay)}
-          icon={DollarSign}
-          tone="warning"
-          hint="Saldo pendiente a proveedores"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <StatCard
-          label="Productos con stock bajo"
-          value={formatNumber(data.lowStockCount, 0)}
-          icon={AlertTriangle}
-          tone={data.lowStockCount > 0 ? 'danger' : 'neutral'}
-          hint="Requieren reposición"
-        />
-        <StatCard
-          label="Cobranza recibida"
-          value={formatCurrency(data.totalCollected)}
-          icon={Wallet}
-          tone="success"
-          hint="Pagos registrados"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Clock size={18} className="text-brand-600" />
-              <h3 className="font-semibold text-ink-900">Ventas recientes</h3>
-            </div>
-            <button
-              onClick={() => onNavigate('sales')}
-              className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
-            >
-              Ver todas <ArrowRight size={12} />
-            </button>
-          </div>
-          {data.recentSales.length === 0 ? (
-            <EmptyState icon={TrendingUp} title="Sin ventas aún" description="Las ventas registradas aparecerán aquí." />
-          ) : (
-            <div className="space-y-1">
-              {data.recentSales.map((sale) => (
-                <div
-                  key={sale.id}
-                  className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-ink-50 transition"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink-800 truncate">
-                      {sale.customer?.name ?? 'Cliente eliminado'}
-                    </p>
-                    <p className="text-xs text-ink-500">
-                      {sale.invoice_number ? `Folio ${sale.invoice_number} · ` : ''}
-                      {formatDate(sale.sale_date)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-ink-900">{formatCurrency(sale.total)}</p>
-                    <Badge variant={sale.status === 'confirmada' ? 'success' : 'neutral'}>{sale.status}</Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={18} className="text-danger-600" />
-              <h3 className="font-semibold text-ink-900">Alertas de inventario</h3>
-            </div>
-            <button
-              onClick={() => onNavigate('inventory')}
-              className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
-            >
-              Ver inventario <ArrowRight size={12} />
-            </button>
-          </div>
-          {data.lowStockProducts.length === 0 ? (
-            <EmptyState
-              icon={Package}
-              title="Inventario saludable"
-              description="Todos los productos están por encima del stock mínimo."
+      {!data ? (
+        <FullPageLoader label="Cargando panel…" />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+            <StatCard
+              label="Ventas totales"
+              value={formatCurrency(data.totalSales)}
+              icon={TrendingUp}
+              tone="success"
+              hint={`Facturas confirmadas · ${periodLabel}`}
             />
-          ) : (
-            <div className="space-y-1">
-              {data.lowStockProducts.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-ink-50 transition"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink-800 truncate">{p.name}</p>
-                    <p className="text-xs text-ink-500">SKU {p.sku}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-danger-600">{formatNumber(p.stock, 0)}</p>
-                    <p className="text-xs text-ink-400">mín. {formatNumber(p.min_stock, 0)}</p>
-                  </div>
+            <StatCard
+              label="Compras totales"
+              value={formatCurrency(data.totalPurchases)}
+              icon={ShoppingCart}
+              tone="brand"
+              hint={`Órdenes a proveedores · ${periodLabel}`}
+            />
+            <StatCard
+              label="Por cobrar"
+              value={formatCurrency(data.totalToCollect)}
+              icon={Wallet}
+              tone="accent"
+              hint={`Saldo pendiente clientes · ${periodLabel}`}
+            />
+            <StatCard
+              label="Por pagar"
+              value={formatCurrency(data.totalToPay)}
+              icon={DollarSign}
+              tone="warning"
+              hint={`Saldo pendiente proveedores · ${periodLabel}`}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <StatCard
+              label="Productos con stock bajo"
+              value={formatNumber(data.lowStockCount, 0)}
+              icon={AlertTriangle}
+              tone={data.lowStockCount > 0 ? 'danger' : 'neutral'}
+              hint="Requieren reposición"
+            />
+            <StatCard
+              label="Cobranza recibida"
+              value={formatCurrency(data.totalCollected)}
+              icon={Wallet}
+              tone="success"
+              hint={`Pagos registrados · ${periodLabel}`}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Clock size={18} className="text-brand-600" />
+                  <h3 className="font-semibold text-ink-900">Ventas recientes</h3>
                 </div>
-              ))}
+                <button
+                  onClick={() => onNavigate('sales')}
+                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                >
+                  Ver todas <ArrowRight size={12} />
+                </button>
+              </div>
+              {data.recentSales.length === 0 ? (
+                <EmptyState icon={TrendingUp} title="Sin ventas aún" description="Las ventas registradas aparecerán aquí." />
+              ) : (
+                <div className="space-y-1">
+                  {data.recentSales.map((sale) => (
+                    <div
+                      key={sale.id}
+                      className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-ink-50 transition"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-ink-800 truncate">
+                          {sale.customer?.name ?? 'Cliente eliminado'}
+                        </p>
+                        <p className="text-xs text-ink-500">
+                          {sale.invoice_number ? `Folio ${sale.invoice_number} · ` : ''}
+                          {formatDate(sale.sale_date)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-ink-900">{formatCurrency(sale.total)}</p>
+                        <Badge variant={sale.status === 'confirmada' ? 'success' : 'neutral'}>{sale.status}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={18} className="text-danger-600" />
+                  <h3 className="font-semibold text-ink-900">Alertas de inventario</h3>
+                </div>
+                <button
+                  onClick={() => onNavigate('inventory')}
+                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                >
+                  Ver inventario <ArrowRight size={12} />
+                </button>
+              </div>
+              {data.lowStockProducts.length === 0 ? (
+                <EmptyState
+                  icon={Package}
+                  title="Inventario saludable"
+                  description="Todos los productos están por encima del stock mínimo."
+                />
+              ) : (
+                <div className="space-y-1">
+                  {data.lowStockProducts.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-ink-50 transition"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-ink-800 truncate">{p.name}</p>
+                        <p className="text-xs text-ink-500">SKU {p.sku}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-danger-600">{formatNumber(p.stock, 0)}</p>
+                        <p className="text-xs text-ink-400">mín. {formatNumber(p.min_stock, 0)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

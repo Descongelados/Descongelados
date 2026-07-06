@@ -9,9 +9,13 @@ import {
   X,
   Package,
   Building2,
+  Wallet,
+  Banknote,
+  Building,
+  CheckCircle2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Product, Purchase, PurchaseItem, Supplier } from '../lib/types';
+import { Product, Purchase, PurchaseItem, Supplier, SupplierPayment } from '../lib/types';
 import { formatCurrency, formatDate, fromDateInputValue, toDateInputValue } from '../lib/format';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
@@ -28,6 +32,7 @@ type ItemRow = {
   quantity: string;
   unit_cost: string;
 };
+type PaymentRow = SupplierPayment & { supplier: Supplier | null; purchase: Purchase | null };
 
 const TAX_RATE = 0.16;
 
@@ -39,19 +44,56 @@ type PaymentSplit = {
 
 const emptyPayments: PaymentSplit = { efectivo: '0', banco: '0', por_pagar: '0' };
 
+const PAYMENT_METHODS = [
+  { value: 'efectivo', label: 'Efectivo', icon: Banknote },
+  { value: 'banco', label: 'Banco', icon: Building },
+  { value: 'por_pagar', label: 'Por pagar', icon: Wallet },
+];
+
+type SupPayForm = {
+  supplier_id: string;
+  purchase_id: string;
+  method: string;
+  amount: string;
+  reference: string;
+  payment_date: string;
+  notes: string;
+};
+
+const emptySupPayForm = (): SupPayForm => ({
+  supplier_id: '',
+  purchase_id: '',
+  method: 'efectivo',
+  amount: '0',
+  reference: '',
+  payment_date: toDateInputValue(new Date()),
+  notes: '',
+});
+
 export default function Purchases() {
   const { push } = useToast();
+  const [tab, setTab] = useState<'compras' | 'pagos'>('compras');
+
   const [purchases, setPurchases] = useState<PurchaseRow[] | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [supPayments, setSupPayments] = useState<PaymentRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [methodFilter, setMethodFilter] = useState('all');
+
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState<PurchaseRow | null>(null);
   const [detailItems, setDetailItems] = useState<(PurchaseItem & { product: Product | null })[]>([]);
   const [detailPayments, setDetailPayments] = useState<Array<{ amount: number; payment_method: string; payment_date: string }>>([]);
   const [editing, setEditing] = useState<Purchase | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PurchaseRow | null>(null);
+
+  const [supPayOpen, setSupPayOpen] = useState(false);
+  const [editingSupPay, setEditingSupPay] = useState<PaymentRow | null>(null);
+  const [deleteSupPay, setDeleteSupPay] = useState<PaymentRow | null>(null);
+  const [supPayForm, setSupPayForm] = useState<SupPayForm>(emptySupPayForm());
+  const [savingSupPay, setSavingSupPay] = useState(false);
 
   const [form, setForm] = useState({
     supplier_id: '',
@@ -68,11 +110,15 @@ export default function Purchases() {
 
   const load = async () => {
     setLoading(true);
-    const [pRes, sRes, prodRes, paysRes] = await Promise.all([
+    const [pRes, sRes, prodRes, paysRes, supPaysRes] = await Promise.all([
       supabase.from('purchases').select('*, supplier:suppliers(*)').order('purchase_date', { ascending: false }),
       supabase.from('suppliers').select('*').order('name'),
       supabase.from('products').select('*').order('name'),
       supabase.from('supplier_payments').select('purchase_id, amount, payment_method'),
+      supabase
+        .from('supplier_payments')
+        .select('*, supplier:suppliers(*), purchase:purchases(*)')
+        .order('payment_date', { ascending: false }),
     ]);
     if (pRes.error) {
       push('error', 'No se pudieron cargar las compras');
@@ -83,6 +129,7 @@ export default function Purchases() {
     if (!sRes.error) setSuppliers(sRes.data as Supplier[]);
     if (!prodRes.error) setProducts(prodRes.data as Product[]);
     setPaymentByPurchase((paysRes.data ?? []) as Array<{ purchase_id: string; amount: number; payment_method: string }>);
+    if (!supPaysRes.error) setSupPayments(supPaysRes.data as PaymentRow[]);
     setLoading(false);
   };
 
@@ -101,6 +148,18 @@ export default function Purchases() {
       return matchesSearch;
     });
   }, [purchases, search]);
+
+  const filteredSupPayments = useMemo(() => {
+    if (!supPayments) return [];
+    return supPayments.filter((p) => {
+      const matchesSearch =
+        !search ||
+        p.supplier?.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.reference?.toLowerCase().includes(search.toLowerCase());
+      const matchesMethod = methodFilter === 'all' || p.payment_method === methodFilter;
+      return matchesSearch && matchesMethod;
+    });
+  }, [supPayments, search, methodFilter]);
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
@@ -122,11 +181,11 @@ export default function Purchases() {
     const efectivo = pays.filter((p) => p.payment_method === 'efectivo').reduce((a, b) => a + b.amount, 0);
     const banco = pays.filter((p) => p.payment_method === 'banco').reduce((a, b) => a + b.amount, 0);
     const paid = efectivo + banco;
-    const porPagar = Math.max(0, purchaseTotal - paid);
+    const porPagarAmt = Math.max(0, purchaseTotal - paid);
     const methods: string[] = [];
     if (efectivo > 0) methods.push('Efectivo');
     if (banco > 0) methods.push('Banco');
-    if (porPagar > 0.005) methods.push('Por pagar');
+    if (porPagarAmt > 0.005) methods.push('Por pagar');
     if (methods.length === 0) return { label: 'Sin pago', variant: 'neutral' as const };
     if (methods.length === 1) {
       if (methods[0] === 'Efectivo') return { label: 'Efectivo', variant: 'success' as const };
@@ -135,6 +194,25 @@ export default function Purchases() {
     }
     return { label: 'Combinado', variant: 'accent' as const };
   };
+
+  const paidByPurchase = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of paymentByPurchase) {
+      if (p.purchase_id) {
+        map.set(p.purchase_id, (map.get(p.purchase_id) ?? 0) + p.amount);
+      }
+    }
+    return map;
+  }, [paymentByPurchase]);
+
+  const totalPendingPay = useMemo(
+    () =>
+      (purchases ?? []).reduce((acc, p) => {
+        const paid = paidByPurchase.get(p.id) ?? 0;
+        return acc + Math.max(0, p.total - paid);
+      }, 0),
+    [purchases, paidByPurchase],
+  );
 
   const openCreate = () => {
     setEditing(null);
@@ -176,11 +254,11 @@ export default function Purchases() {
     const pays = (paysRes.data ?? []) as Array<{ amount: number; payment_method: string }>;
     const efectivo = pays.filter((x) => x.payment_method === 'efectivo').reduce((a, b) => a + b.amount, 0);
     const banco = pays.filter((x) => x.payment_method === 'banco').reduce((a, b) => a + b.amount, 0);
-    const porPagar = Math.max(0, p.total - efectivo - banco);
+    const por_pagar = Math.max(0, p.total - efectivo - banco);
     setPayments({
       efectivo: String(efectivo),
       banco: String(banco),
-      por_pagar: String(porPagar),
+      por_pagar: String(por_pagar),
     });
     setModalOpen(true);
   };
@@ -320,19 +398,160 @@ export default function Purchases() {
     setDeleteTarget(null);
   };
 
+  const openRegisterPayment = (purchase: PurchaseRow) => {
+    setEditingSupPay(null);
+    const balance = purchase.total - (paidByPurchase.get(purchase.id) ?? 0);
+    setSupPayForm({
+      supplier_id: purchase.supplier_id,
+      purchase_id: purchase.id,
+      method: 'efectivo',
+      amount: String(balance > 0 ? balance.toFixed(2) : '0'),
+      reference: '',
+      payment_date: toDateInputValue(new Date()),
+      notes: '',
+    });
+    setSupPayOpen(true);
+  };
+
+  const openEditSupPay = (p: PaymentRow) => {
+    setEditingSupPay(p);
+    setSupPayForm({
+      supplier_id: p.supplier_id,
+      purchase_id: p.purchase_id ?? '',
+      method: p.payment_method,
+      amount: String(p.amount),
+      reference: p.reference ?? '',
+      payment_date: toDateInputValue(p.payment_date),
+      notes: p.notes ?? '',
+    });
+    setSupPayOpen(true);
+  };
+
+  const saveSupPay = async () => {
+    const amount = Number(supPayForm.amount);
+    if (!supPayForm.supplier_id) {
+      push('error', 'Selecciona un proveedor');
+      return;
+    }
+    if (!amount || amount <= 0) {
+      push('error', 'El monto debe ser mayor a cero');
+      return;
+    }
+    setSavingSupPay(true);
+    const payload = {
+      supplier_id: supPayForm.supplier_id,
+      purchase_id: supPayForm.purchase_id || null,
+      amount,
+      payment_method: supPayForm.method,
+      reference: supPayForm.reference.trim() || null,
+      payment_date: fromDateInputValue(supPayForm.payment_date),
+      notes: supPayForm.notes.trim() || null,
+    };
+    if (editingSupPay) {
+      const { error } = await supabase.from('supplier_payments').update(payload).eq('id', editingSupPay.id);
+      if (error) push('error', 'No se pudo actualizar el pago');
+      else {
+        push('success', 'Pago actualizado');
+        setSupPayOpen(false);
+        load();
+      }
+    } else {
+      const { error } = await supabase.from('supplier_payments').insert(payload);
+      if (error) push('error', 'No se pudo registrar el pago');
+      else {
+        push('success', 'Pago registrado');
+        setSupPayOpen(false);
+        load();
+      }
+    }
+    setSavingSupPay(false);
+  };
+
+  const confirmDeleteSupPay = async () => {
+    if (!deleteSupPay) return;
+    const { error } = await supabase.from('supplier_payments').delete().eq('id', deleteSupPay.id);
+    if (error) push('error', 'No se pudo eliminar el pago');
+    else {
+      push('success', 'Pago eliminado');
+      load();
+    }
+    setDeleteSupPay(null);
+  };
+
+  const methodLabel = (m: string) => PAYMENT_METHODS.find((p) => p.value === m)?.label ?? m;
+
+  const selectedPurchaseForPay = supPayForm.purchase_id
+    ? (purchases ?? []).find((p) => p.id === supPayForm.purchase_id) ?? null
+    : null;
+  const balanceForSelectedPurchase = selectedPurchaseForPay
+    ? selectedPurchaseForPay.total - (paidByPurchase.get(selectedPurchaseForPay.id) ?? 0)
+    : null;
+
   return (
     <div className="animate-fade-in">
       <PageHeader
         title="Compras"
-        description="Órdenes de compra a proveedores"
+        description="Órdenes de compra y pagos a proveedores"
         actions={
-          <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
-            <Plus size={16} /> Nueva compra
-          </button>
+          tab === 'compras' ? (
+            <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
+              <Plus size={16} /> Nueva compra
+            </button>
+          ) : (
+            <button
+              className="btn-primary"
+              onClick={() => {
+                setEditingSupPay(null);
+                setSupPayForm({ ...emptySupPayForm(), supplier_id: suppliers[0]?.id ?? '' });
+                setSupPayOpen(true);
+              }}
+              disabled={suppliers.length === 0}
+            >
+              <Plus size={16} /> Nuevo pago
+            </button>
+          )
         }
       />
 
-      {(suppliers.length === 0 || products.length === 0) && !loading && (
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+              <ShoppingCart size={20} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-ink-900">{(purchases ?? []).length}</p>
+              <p className="text-sm text-ink-500">Órdenes de compra</p>
+            </div>
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-warning-50 text-warning-600">
+              <Wallet size={20} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalPendingPay)}</p>
+              <p className="text-sm text-ink-500">Por pagar</p>
+            </div>
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-success-50 text-success-600">
+              <CheckCircle2 size={20} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-ink-900">
+                {(purchases ?? []).filter((p) => Math.abs((paidByPurchase.get(p.id) ?? 0) - p.total) < 0.01).length}
+              </p>
+              <p className="text-sm text-ink-500">Pagadas completo</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {(suppliers.length === 0 || products.length === 0) && !loading && tab === 'compras' && (
         <div className="card p-4 mb-4 flex items-start gap-3 bg-warning-50 border-warning-200">
           <Building2 size={18} className="text-warning-600 mt-0.5" />
           <p className="text-sm text-warning-700">
@@ -343,99 +562,228 @@ export default function Purchases() {
         </div>
       )}
 
+      <div className="flex items-center gap-1 mb-4 border-b border-ink-200">
+        <button
+          onClick={() => { setTab('compras'); setSearch(''); setMethodFilter('all'); }}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
+            tab === 'compras'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-ink-500 hover:text-ink-700'
+          }`}
+        >
+          <ShoppingCart size={16} /> Compras
+          <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
+            {(purchases ?? []).length}
+          </span>
+        </button>
+        <button
+          onClick={() => { setTab('pagos'); setSearch(''); setMethodFilter('all'); }}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
+            tab === 'pagos'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-ink-500 hover:text-ink-700'
+          }`}
+        >
+          <Wallet size={16} /> Pagos a proveedores
+          <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
+            {supPayments?.length ?? 0}
+          </span>
+        </button>
+      </div>
+
       <div className="card p-4 mb-4">
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-          <input
-            className="input pl-9"
-            placeholder="Buscar por folio o proveedor…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+            <input
+              className="input pl-9"
+              placeholder={tab === 'compras' ? 'Buscar por folio o proveedor…' : 'Buscar por proveedor o referencia…'}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          {tab === 'pagos' && (
+            <select
+              className="input w-auto"
+              value={methodFilter}
+              onChange={(e) => setMethodFilter(e.target.value)}
+            >
+              <option value="all">Todos los métodos</option>
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
-      <div className="card overflow-hidden">
-        {loading ? (
-          <FullPageLoader />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={ShoppingCart}
-            title="Sin compras"
-            description="Registra tu primera orden de compra a un proveedor."
-            action={
-              <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
-                <Plus size={16} /> Nueva compra
-              </button>
-            }
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-ink-100">
-              <thead className="bg-ink-50/60">
-                <tr>
-                  <th className="table-head">Folio</th>
-                  <th className="table-head">Proveedor</th>
-                  <th className="table-head">Fecha</th>
-                  <th className="table-head text-right">Subtotal</th>
-                  <th className="table-head text-right">Impuesto</th>
-                  <th className="table-head text-right">Total</th>
-                  <th className="table-head">Pago</th>
-                  <th className="table-head">Estado</th>
-                  <th className="table-head text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink-100">
-                {filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-ink-50/60 transition">
-                    <td className="table-cell font-mono text-xs">{p.invoice_number ?? '—'}</td>
-                    <td className="table-cell font-semibold text-ink-900">{p.supplier?.name ?? '—'}</td>
-                    <td className="table-cell">{formatDate(p.purchase_date)}</td>
-                    <td className="table-cell text-right">{formatCurrency(p.subtotal)}</td>
-                    <td className="table-cell text-right">{formatCurrency(p.tax)}</td>
-                    <td className="table-cell text-right font-semibold">{formatCurrency(p.total)}</td>
-                    <td className="table-cell">
-                      {(() => {
-                        const pl = getPaymentLabel(p.id, p.total);
-                        return <Badge variant={pl.variant}>{pl.label}</Badge>;
-                      })()}
-                    </td>
-                    <td className="table-cell">
-                      <Badge variant={p.status === 'confirmada' ? 'success' : 'neutral'}>{p.status}</Badge>
-                    </td>
-                    <td className="table-cell text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => openDetail(p)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                          aria-label="Ver detalle"
-                        >
-                          <Eye size={16} />
-                        </button>
-                        <button
-                          onClick={() => openEdit(p)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                          aria-label="Editar"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteTarget(p)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
-                          aria-label="Eliminar"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
+      {tab === 'compras' ? (
+        <div className="card overflow-hidden">
+          {loading ? (
+            <FullPageLoader />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={ShoppingCart}
+              title="Sin compras"
+              description="Registra tu primera orden de compra a un proveedor."
+              action={
+                <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
+                  <Plus size={16} /> Nueva compra
+                </button>
+              }
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-ink-100">
+                <thead className="bg-ink-50/60">
+                  <tr>
+                    <th className="table-head">Folio</th>
+                    <th className="table-head">Proveedor</th>
+                    <th className="table-head">Fecha</th>
+                    <th className="table-head text-right">Subtotal</th>
+                    <th className="table-head text-right">Impuesto</th>
+                    <th className="table-head text-right">Total</th>
+                    <th className="table-head text-right">Saldo</th>
+                    <th className="table-head">Pago</th>
+                    <th className="table-head">Estado</th>
+                    <th className="table-head text-right">Acciones</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {filtered.map((p) => {
+                    const paid = paidByPurchase.get(p.id) ?? 0;
+                    const balance = Math.max(0, p.total - paid);
+                    return (
+                      <tr key={p.id} className="hover:bg-ink-50/60 transition">
+                        <td className="table-cell font-mono text-xs">{p.invoice_number ?? '—'}</td>
+                        <td className="table-cell font-semibold text-ink-900">{p.supplier?.name ?? '—'}</td>
+                        <td className="table-cell">{formatDate(p.purchase_date)}</td>
+                        <td className="table-cell text-right">{formatCurrency(p.subtotal)}</td>
+                        <td className="table-cell text-right">{formatCurrency(p.tax)}</td>
+                        <td className="table-cell text-right font-semibold">{formatCurrency(p.total)}</td>
+                        <td className="table-cell text-right">
+                          {balance > 0.005 ? (
+                            <span className="font-semibold text-warning-600">{formatCurrency(balance)}</span>
+                          ) : (
+                            <span className="text-success-600 font-semibold">Pagado</span>
+                          )}
+                        </td>
+                        <td className="table-cell">
+                          {(() => {
+                            const pl = getPaymentLabel(p.id, p.total);
+                            return <Badge variant={pl.variant}>{pl.label}</Badge>;
+                          })()}
+                        </td>
+                        <td className="table-cell">
+                          <Badge variant={p.status === 'confirmada' ? 'success' : 'neutral'}>{p.status}</Badge>
+                        </td>
+                        <td className="table-cell text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {balance > 0.005 && (
+                              <button
+                                onClick={() => openRegisterPayment(p)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-success-50 px-2.5 py-1.5 text-xs font-semibold text-success-700 hover:bg-success-100 transition"
+                                title="Registrar pago"
+                              >
+                                <Wallet size={14} /> Pagar
+                              </button>
+                            )}
+                            <button
+                              onClick={() => openDetail(p)}
+                              className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
+                              aria-label="Ver detalle"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              onClick={() => openEdit(p)}
+                              className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
+                              aria-label="Editar"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            <button
+                              onClick={() => setDeleteTarget(p)}
+                              className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
+                              aria-label="Eliminar"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
+          {loading ? (
+            <FullPageLoader />
+          ) : filteredSupPayments.length === 0 ? (
+            <EmptyState
+              icon={Wallet}
+              title="Sin pagos registrados"
+              description="Registra pagos a proveedores desde la tabla de compras o con el botón de arriba."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-ink-100">
+                <thead className="bg-ink-50/60">
+                  <tr>
+                    <th className="table-head">Fecha</th>
+                    <th className="table-head">Proveedor</th>
+                    <th className="table-head">Folio compra</th>
+                    <th className="table-head">Método</th>
+                    <th className="table-head">Referencia</th>
+                    <th className="table-head text-right">Monto</th>
+                    <th className="table-head text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {filteredSupPayments.map((p) => (
+                    <tr key={p.id} className="hover:bg-ink-50/60 transition">
+                      <td className="table-cell">{formatDate(p.payment_date)}</td>
+                      <td className="table-cell font-semibold text-ink-900">{p.supplier?.name ?? '—'}</td>
+                      <td className="table-cell font-mono text-xs">{p.purchase?.invoice_number ?? '—'}</td>
+                      <td className="table-cell">
+                        <Badge variant="neutral">{methodLabel(p.payment_method)}</Badge>
+                      </td>
+                      <td className="table-cell">{p.reference ?? '—'}</td>
+                      <td className="table-cell text-right font-semibold text-success-600">
+                        {formatCurrency(p.amount)}
+                      </td>
+                      <td className="table-cell text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEditSupPay(p)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
+                            aria-label="Editar"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteSupPay(p)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
+                            aria-label="Eliminar"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
+      {/* Purchase create/edit modal */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -629,7 +977,7 @@ export default function Purchases() {
 
           <div className="rounded-lg border border-ink-200 p-4">
             <div className="flex items-center justify-between mb-3">
-              <label className="label !mb-0">Pago</label>
+              <label className="label !mb-0">Pago inicial</label>
               <span className="text-xs text-ink-500">
                 Total a cubrir: <span className="font-bold text-ink-900">{formatCurrency(totals.total)}</span>
               </span>
@@ -701,6 +1049,7 @@ export default function Purchases() {
         </div>
       </Modal>
 
+      {/* Purchase detail modal */}
       <Modal
         open={!!detailOpen}
         onClose={() => setDetailOpen(null)}
@@ -812,12 +1161,181 @@ export default function Purchases() {
         )}
       </Modal>
 
+      {/* Register/edit supplier payment modal */}
+      <Modal
+        open={supPayOpen}
+        onClose={() => setSupPayOpen(false)}
+        title={editingSupPay ? 'Editar pago a proveedor' : 'Registrar pago a proveedor'}
+        description={editingSupPay ? 'Modifica los datos del pago' : 'Registra un pago por una compra a crédito'}
+        size="lg"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setSupPayOpen(false)} disabled={savingSupPay}>
+              Cancelar
+            </button>
+            <button className="btn-success" onClick={saveSupPay} disabled={savingSupPay}>
+              {savingSupPay ? 'Guardando…' : 'Guardar pago'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Proveedor *</label>
+              <select
+                className="input"
+                value={supPayForm.supplier_id}
+                onChange={(e) => setSupPayForm({ ...supPayForm, supplier_id: e.target.value, purchase_id: '' })}
+              >
+                <option value="">Selecciona…</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Compra asociada</label>
+              <select
+                className="input"
+                value={supPayForm.purchase_id}
+                onChange={(e) => {
+                  const purchaseId = e.target.value;
+                  const purchase = (purchases ?? []).find((p) => p.id === purchaseId);
+                  if (purchase) {
+                    const balance = purchase.total - (paidByPurchase.get(purchase.id) ?? 0);
+                    setSupPayForm({
+                      ...supPayForm,
+                      purchase_id: purchaseId,
+                      amount: String(balance > 0 ? balance.toFixed(2) : supPayForm.amount),
+                    });
+                  } else {
+                    setSupPayForm({ ...supPayForm, purchase_id: purchaseId });
+                  }
+                }}
+              >
+                <option value="">Sin compra específica</option>
+                {(purchases ?? [])
+                  .filter((p) => !supPayForm.supplier_id || p.supplier_id === supPayForm.supplier_id)
+                  .map((p) => {
+                    const bal = Math.max(0, p.total - (paidByPurchase.get(p.id) ?? 0));
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.invoice_number ?? 'Sin folio'} · {formatCurrency(p.total)}
+                        {bal > 0.005 ? ` (saldo: ${formatCurrency(bal)})` : ' ✓'}
+                      </option>
+                    );
+                  })}
+              </select>
+            </div>
+          </div>
+
+          {selectedPurchaseForPay && balanceForSelectedPurchase !== null && (
+            <div className="rounded-lg bg-ink-50 p-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-ink-500">Total de la compra</span>
+                <span className="font-semibold text-ink-900">{formatCurrency(selectedPurchaseForPay.total)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-500">Ya pagado</span>
+                <span className="font-semibold text-success-600">
+                  {formatCurrency(paidByPurchase.get(selectedPurchaseForPay.id) ?? 0)}
+                </span>
+              </div>
+              <div className="flex justify-between pt-1.5 border-t border-ink-200 mt-1.5">
+                <span className="font-semibold text-ink-700">Saldo pendiente</span>
+                <span className={`font-bold ${balanceForSelectedPurchase > 0 ? 'text-warning-600' : 'text-success-600'}`}>
+                  {balanceForSelectedPurchase > 0 ? formatCurrency(balanceForSelectedPurchase) : 'Pagado'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="label">Método de pago</label>
+            <div className="grid grid-cols-3 gap-2">
+              {PAYMENT_METHODS.filter((m) => m.value !== 'por_pagar').concat(PAYMENT_METHODS.filter((m) => m.value === 'por_pagar')).map((m) => {
+                const Icon = m.icon;
+                const active = supPayForm.method === m.value;
+                return (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setSupPayForm({ ...supPayForm, method: m.value })}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
+                      active
+                        ? 'border-brand-500 bg-brand-50 text-brand-700'
+                        : 'border-ink-200 bg-white text-ink-600 hover:bg-ink-50'
+                    }`}
+                  >
+                    <Icon size={16} />
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Monto *</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={supPayForm.amount}
+                onChange={(e) => setSupPayForm({ ...supPayForm, amount: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="label">Fecha</label>
+              <input
+                className="input"
+                type="date"
+                value={supPayForm.payment_date}
+                onChange={(e) => setSupPayForm({ ...supPayForm, payment_date: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Referencia</label>
+              <input
+                className="input"
+                value={supPayForm.reference}
+                onChange={(e) => setSupPayForm({ ...supPayForm, reference: e.target.value })}
+                placeholder="Folio de transferencia, etc."
+              />
+            </div>
+            <div>
+              <label className="label">Notas</label>
+              <input
+                className="input"
+                value={supPayForm.notes}
+                onChange={(e) => setSupPayForm({ ...supPayForm, notes: e.target.value })}
+                placeholder="Notas internas"
+              />
+            </div>
+          </div>
+        </div>
+      </Modal>
+
       <ConfirmDialog
         open={!!deleteTarget}
         title="Eliminar compra"
         message="Se eliminará la compra y sus productos. El stock se revertirá automáticamente."
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteSupPay}
+        title="Eliminar pago"
+        message="¿Eliminar este pago al proveedor? El saldo de la cuenta por pagar se recalculará."
+        onConfirm={confirmDeleteSupPay}
+        onCancel={() => setDeleteSupPay(null)}
       />
     </div>
   );
