@@ -9,6 +9,9 @@ import {
   ArrowRight,
   Clock,
   Calendar,
+  Banknote,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate, formatNumber } from '../lib/format';
@@ -19,12 +22,16 @@ import { FullPageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
 import { ViewKey } from '../components/Sidebar';
 
+const CASH_INITIAL_KEY = 'dashboard_cash_initial';
+
 type DashboardData = {
   totalSales: number;
   totalPurchases: number;
   totalCollected: number;
   totalToCollect: number;
   totalToPay: number;
+  cashSales: number;
+  cashExpenses: number;
   lowStockCount: number;
   recentSales: Array<{
     id: string;
@@ -61,6 +68,25 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Efectivo inicial — persisted in localStorage, editable inline
+  const [cashInitial, setCashInitial] = useState<number>(() => {
+    const stored = localStorage.getItem(CASH_INITIAL_KEY);
+    return stored ? Number(stored) : 0;
+  });
+  const [editingCash, setEditingCash] = useState(false);
+  const [cashDraft, setCashDraft] = useState('');
+
+  const startEditCash = () => {
+    setCashDraft(String(cashInitial));
+    setEditingCash(true);
+  };
+  const commitCash = () => {
+    const val = Math.max(0, Number(cashDraft) || 0);
+    setCashInitial(val);
+    localStorage.setItem(CASH_INITIAL_KEY, String(val));
+    setEditingCash(false);
+  };
+
   const { monday, sunday, label: weekLabel } = currentWeekRange();
 
   useEffect(() => {
@@ -80,8 +106,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       ] = await Promise.all([
         applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
-        applyWeek(supabase.from('collections').select('amount'), 'collection_date'),
-        applyWeek(supabase.from('supplier_payments').select('amount'), 'payment_date'),
+        applyWeek(supabase.from('collections').select('amount, payment_method'), 'collection_date'),
+        applyWeek(supabase.from('supplier_payments').select('amount, payment_method'), 'payment_date'),
         supabase.from('products').select('id, sku, name, stock, min_stock').eq('is_active', true),
         supabase
           .from('sales')
@@ -102,8 +128,22 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
 
       const totalSales = sum((salesRes.data ?? []) as Array<{ total: number }>);
       const totalPurchases = sum((purchasesRes.data ?? []) as Array<{ total: number }>);
-      const totalCollected = sum((collectionsRes.data ?? []) as Array<{ amount: number }>);
-      const totalPaid = sum((supplierPaymentsRes.data ?? []) as Array<{ amount: number }>);
+
+      type PayRow = { amount: number; payment_method: string };
+      const collections = (collectionsRes.data ?? []) as PayRow[];
+      const supplierPayments = (supplierPaymentsRes.data ?? []) as PayRow[];
+
+      const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
+      const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
+
+      // efectivo = cobros en efectivo de ventas esta semana
+      const cashSales = collections
+        .filter((r) => r.payment_method === 'efectivo')
+        .reduce((s, r) => s + r.amount, 0);
+      // gastos en efectivo = pagos a proveedores en efectivo esta semana
+      const cashExpenses = supplierPayments
+        .filter((r) => r.payment_method === 'efectivo')
+        .reduce((s, r) => s + r.amount, 0);
 
       const lowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
       const actualLowStock = lowStock.filter((p) => p.stock <= p.min_stock);
@@ -114,6 +154,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         totalCollected,
         totalToCollect: totalSales - totalCollected,
         totalToPay: totalPurchases - totalPaid,
+        cashSales,
+        cashExpenses,
         lowStockCount: actualLowStock.length,
         recentSales: (recentSalesRes.data ?? []) as unknown as DashboardData['recentSales'],
         lowStockProducts: actualLowStock.slice(0, 5),
@@ -172,6 +214,78 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               tone="warning"
               hint="Saldo pendiente proveedores · esta semana"
             />
+          </div>
+
+          {/* ── Resumen Efectivo ── */}
+          <div className="card p-5 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Banknote size={18} className="text-success-600" />
+              <h3 className="font-semibold text-ink-900">Resumen Efectivo</h3>
+              <span className="ml-1 text-xs text-ink-400">· esta semana</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+
+              {/* Efectivo inicial */}
+              <div className="rounded-xl bg-ink-50 border border-ink-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-500 mb-1">Efectivo inicial</p>
+                {editingCash ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm text-ink-500">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="input py-1 text-base font-bold w-full"
+                      value={cashDraft}
+                      onChange={(e) => setCashDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') commitCash(); if (e.key === 'Escape') setEditingCash(false); }}
+                      autoFocus
+                    />
+                    <button onClick={commitCash} className="rounded-lg p-1.5 bg-success-50 text-success-600 hover:bg-success-100 transition" title="Confirmar">
+                      <Check size={15} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl font-bold text-ink-900">{formatCurrency(cashInitial)}</span>
+                    <button onClick={startEditCash} className="rounded-lg p-1 text-ink-400 hover:bg-ink-200 hover:text-ink-700 transition" title="Editar">
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+                )}
+                <p className="text-[11px] text-ink-400 mt-1">Editable · no se guarda en BD</p>
+              </div>
+
+              {/* Ventas en efectivo */}
+              <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Ventas en efectivo</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(data.cashSales)}</p>
+                <p className="text-[11px] text-success-500 mt-1">Cobros en efectivo</p>
+              </div>
+
+              {/* Gastos en efectivo */}
+              <div className="rounded-xl bg-danger-50 border border-danger-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-danger-600 mb-1">Gastos en efectivo</p>
+                <p className="text-xl font-bold text-danger-700">{formatCurrency(data.cashExpenses)}</p>
+                <p className="text-[11px] text-danger-500 mt-1">Pagos a proveedores</p>
+              </div>
+
+              {/* Balance */}
+              {(() => {
+                const balance = cashInitial + data.cashSales - data.cashExpenses;
+                const positive = balance >= 0;
+                return (
+                  <div className={`rounded-xl border px-4 py-3 ${positive ? 'bg-brand-50 border-brand-200' : 'bg-warning-50 border-warning-200'}`}>
+                    <p className={`text-xs font-semibold uppercase tracking-wide mb-1 ${positive ? 'text-brand-600' : 'text-warning-600'}`}>Balance</p>
+                    <p className={`text-xl font-bold ${positive ? 'text-brand-700' : 'text-warning-700'}`}>{formatCurrency(balance)}</p>
+                    <p className={`text-[11px] mt-1 ${positive ? 'text-brand-400' : 'text-warning-500'}`}>
+                      Inicial + ventas − gastos
+                    </p>
+                  </div>
+                );
+              })()}
+
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
