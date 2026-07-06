@@ -239,9 +239,9 @@ export default function Sales() {
       push('success', 'Venta registrada');
       setModalOpen(false);
       setSaving(false);
-      await load();
-      const createdRow = (sales ?? []).find((s) => s.id === created.id) ?? null;
-      const row: SaleRow = createdRow ?? (created as SaleRow);
+      load(); // refresh list in background
+      const customer = customers.find((c) => c.id === form.customer_id) ?? null;
+      const row: SaleRow = { ...(created as Sale), customer };
       openReceipt(row);
     }
   };
