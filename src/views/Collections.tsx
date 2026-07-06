@@ -10,6 +10,7 @@ import {
   PackageCheck,
   AlertCircle,
   Receipt,
+  History,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Collection, Customer, Sale } from '../lib/types';
@@ -22,6 +23,8 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
 import SaleReceiptModal from '../components/ui/SaleReceiptModal';
+import AbonoReceiptModal, { AbonoData } from '../components/ui/AbonoReceiptModal';
+import AbonosHistorialModal from '../components/ui/AbonosHistorialModal';
 import { useAuth } from '../lib/auth';
 
 type SaleRow = Sale & { customer: Customer | null };
@@ -83,6 +86,8 @@ export default function Collections() {
   const [deleteTarget, setDeleteTarget] = useState<CollectionRow | null>(null);
   const [confirmDelivery, setConfirmDelivery] = useState<SaleRow | null>(null);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
+  const [abonoReceipt, setAbonoReceipt] = useState<AbonoData | null>(null);
+  const [abonosHistorialSale, setAbonosHistorialSale] = useState<SaleRow | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -278,19 +283,33 @@ export default function Collections() {
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from('collections').insert({
-      customer_id: paymentTarget.customer_id,
-      sale_id: paymentTarget.id,
-      amount,
-      payment_method: paymentForm.method,
-      reference: paymentForm.reference.trim() || null,
-      collection_date: fromDateInputValue(paymentForm.payment_date),
-      notes: paymentForm.notes.trim() || null,
-    });
+    const collDate = fromDateInputValue(paymentForm.payment_date);
+    const { data: inserted, error } = await supabase
+      .from('collections')
+      .insert({
+        customer_id: paymentTarget.customer_id,
+        sale_id: paymentTarget.id,
+        amount,
+        payment_method: paymentForm.method,
+        reference: paymentForm.reference.trim() || null,
+        collection_date: collDate,
+        notes: paymentForm.notes.trim() || null,
+      })
+      .select()
+      .single();
     if (error) push('error', 'No se pudo registrar el pago');
     else {
       push('success', 'Pago registrado');
       setPaymentOpen(false);
+      const newTotalPaid = (paidBySale.get(paymentTarget.id) ?? 0) + amount;
+      const newBalance = paymentTarget.total - newTotalPaid;
+      // Always open abono ticket (full payment also counts as receipt)
+      setAbonoReceipt({
+        collection: inserted as Collection,
+        sale: paymentTarget,
+        totalPaid: newTotalPaid,
+        balance: newBalance,
+      });
       load();
     }
     setSaving(false);
@@ -566,38 +585,61 @@ export default function Collections() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-danger-100">
-                    {pendingPaymentSales.map((s) => (
-                      <tr key={s.id} className="hover:bg-danger-50/30 transition">
-                        <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
-                        <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
-                        <td className="table-cell">{formatDate(s.sale_date)}</td>
-                        <td className="table-cell text-right">{formatCurrency(s.total)}</td>
-                        <td className="table-cell text-right text-success-600">{formatCurrency(s.paid)}</td>
-                        <td className="table-cell text-right font-bold text-danger-600">
-                          {formatCurrency(s.balance)}
-                        </td>
-                        <td className="table-cell text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            {canEdit && (
-                            <button
-                              onClick={() => openRegisterPayment(s)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
-                            >
-                              <Wallet size={14} /> Registrar pago
-                            </button>
-                            )}
-                            <button
-                              onClick={() => setReceiptSale(s)}
-                              className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
-                              aria-label="Ver ticket"
-                              title="Ver ticket"
-                            >
-                              <Receipt size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {pendingPaymentSales.map((s) => {
+                      const hasAbonos = (paidBySale.get(s.id) ?? 0) > 0;
+                      const saleCollections = (collections ?? []).filter((c) => c.sale_id === s.id);
+                      return (
+                        <tr key={s.id} className="hover:bg-danger-50/30 transition">
+                          <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
+                          <td className="table-cell font-semibold text-ink-900">
+                            <div className="flex flex-col gap-0.5">
+                              <span>{s.customer?.name ?? '—'}</span>
+                              {hasAbonos && (
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5 w-fit">
+                                  <History size={10} /> Con abonos ({saleCollections.length})
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="table-cell">{formatDate(s.sale_date)}</td>
+                          <td className="table-cell text-right">{formatCurrency(s.total)}</td>
+                          <td className="table-cell text-right text-success-600">{formatCurrency(s.paid)}</td>
+                          <td className="table-cell text-right font-bold text-danger-600">
+                            {formatCurrency(s.balance)}
+                          </td>
+                          <td className="table-cell text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {canEdit && (
+                                <button
+                                  onClick={() => openRegisterPayment(s)}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
+                                >
+                                  <Wallet size={14} /> Registrar pago
+                                </button>
+                              )}
+                              {hasAbonos && (
+                                <button
+                                  onClick={() => setAbonosHistorialSale(s)}
+                                  className="rounded-lg p-1.5 text-ink-500 hover:bg-amber-50 hover:text-amber-700 transition"
+                                  aria-label="Ver historial de abonos"
+                                  title="Ver historial de abonos"
+                                >
+                                  <History size={16} />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setReceiptSale(s)}
+                                className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                                aria-label="Ver ticket"
+                                title="Ver ticket"
+                              >
+                                <Receipt size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -640,32 +682,57 @@ export default function Collections() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-100">
-                  {paidSales.map((s) => (
-                    <tr key={s.id} className="hover:bg-ink-50/60 transition">
-                      <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
-                      <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
-                      <td className="table-cell">{formatDate(s.sale_date)}</td>
-                      <td className="table-cell text-right">{formatCurrency(s.total)}</td>
-                      <td className="table-cell text-right font-semibold text-success-600">
-                        {formatCurrency(s.paid)}
-                      </td>
-                      <td className="table-cell">
-                        <Badge variant="success">
-                          <CheckCircle2 size={12} /> Cobrada
-                        </Badge>
-                      </td>
-                      <td className="table-cell text-right">
-                        <button
-                          onClick={() => setReceiptSale(s)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
-                          aria-label="Ver ticket"
-                          title="Ver ticket"
-                        >
-                          <Receipt size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {paidSales.map((s) => {
+                    const saleCollections = (collections ?? []).filter((c) => c.sale_id === s.id);
+                    const wasAbonado = saleCollections.length > 1;
+                    return (
+                      <tr key={s.id} className="hover:bg-ink-50/60 transition">
+                        <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
+                        <td className="table-cell font-semibold text-ink-900">
+                          <div className="flex flex-col gap-0.5">
+                            <span>{s.customer?.name ?? '—'}</span>
+                            {wasAbonado && (
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5 w-fit">
+                                <History size={10} /> Cobrada con {saleCollections.length} abonos
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="table-cell">{formatDate(s.sale_date)}</td>
+                        <td className="table-cell text-right">{formatCurrency(s.total)}</td>
+                        <td className="table-cell text-right font-semibold text-success-600">
+                          {formatCurrency(s.paid)}
+                        </td>
+                        <td className="table-cell">
+                          <Badge variant="success">
+                            <CheckCircle2 size={12} /> Cobrada
+                          </Badge>
+                        </td>
+                        <td className="table-cell text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {wasAbonado && (
+                              <button
+                                onClick={() => setAbonosHistorialSale(s)}
+                                className="rounded-lg p-1.5 text-ink-500 hover:bg-amber-50 hover:text-amber-700 transition"
+                                aria-label="Ver historial de abonos"
+                                title="Ver historial de abonos"
+                              >
+                                <History size={16} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setReceiptSale(s)}
+                              className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                              aria-label="Ver ticket"
+                              title="Ver ticket"
+                            >
+                              <Receipt size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -912,6 +979,13 @@ export default function Collections() {
         onCancel={() => setDeleteTarget(null)}
       />
       <SaleReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />
+      <AbonoReceiptModal data={abonoReceipt} onClose={() => setAbonoReceipt(null)} />
+      <AbonosHistorialModal
+        sale={abonosHistorialSale}
+        collections={(collections ?? []).filter((c) => c.sale_id === abonosHistorialSale?.id)}
+        totalPaid={abonosHistorialSale ? (paidBySale.get(abonosHistorialSale.id) ?? 0) : 0}
+        onClose={() => setAbonosHistorialSale(null)}
+      />
     </div>
   );
 }
