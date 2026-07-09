@@ -30,10 +30,10 @@ export default function LoginScreen() {
       <div className="w-full max-w-sm">
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-lg shadow-brand-600/30 mb-4">
+          <div className="inline-flex h-36 w-36 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-lg shadow-brand-600/30 mb-4">
             {company.logo
-              ? <img src={company.logo} alt="logo" className="h-12 w-12 object-contain rounded-xl" />
-              : <Boxes size={32} />
+              ? <img src={company.logo} alt="logo" className="h-full w-full object-contain rounded-xl" />
+              : <Boxes size={72} />
             }
           </div>
           <h1 className="text-2xl font-bold text-ink-900">{company.name}</h1>
