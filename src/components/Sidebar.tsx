@@ -80,12 +80,12 @@ export default function Sidebar({ current, onNavigate }: SidebarProps) {
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        <div className="flex items-center justify-between px-5 h-28 border-b border-white/10">
+        <div className="flex items-center justify-between px-5 h-36 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white shadow-lg shadow-brand-500/30 overflow-hidden">
+            <div className="flex h-36 w-36 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white shadow-lg shadow-brand-500/30 overflow-hidden">
               {company.logo
                 ? <img src={company.logo} alt="logo" className="h-full w-full object-contain" />
-                : <Boxes size={56} />
+                : <Boxes size={72} />
               }
             </div>
             <div className="min-w-0">
