@@ -1,3 +1,4 @@
+// v2 — company stored in Supabase app_settings
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Role, hasPermission, Permission } from './permissions';
 import { supabase } from './supabase';
