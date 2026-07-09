@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { Boxes, LogIn, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '../lib/auth';
-import { loadCompany } from '../lib/auth';
+import { useAuth, useCompany } from '../lib/auth';
 
 export default function LoginScreen() {
   const { login } = useAuth();
-  const company = loadCompany();
+  const company = useCompany();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);

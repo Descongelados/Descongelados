@@ -22,7 +22,6 @@ import { FullPageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
 import { ViewKey } from '../components/Sidebar';
 
-const CASH_INITIAL_KEY = 'dashboard_cash_initial';
 
 type DashboardData = {
   totalSales: number;
@@ -68,23 +67,33 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Efectivo inicial — persisted in localStorage, editable inline
-  const [cashInitial, setCashInitial] = useState<number>(() => {
-    const stored = localStorage.getItem(CASH_INITIAL_KEY);
-    return stored ? Number(stored) : 0;
-  });
+  // Efectivo inicial — persisted in Supabase app_settings
+  const [cashInitial, setCashInitial] = useState<number>(0);
   const [editingCash, setEditingCash] = useState(false);
   const [cashDraft, setCashDraft] = useState('');
+
+  useEffect(() => {
+    supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'dashboard_cash_initial')
+      .maybeSingle()
+      .then(({ data: row }) => {
+        if (row) setCashInitial(Number((row.value as { amount: number }).amount) || 0);
+      });
+  }, []);
 
   const startEditCash = () => {
     setCashDraft(String(cashInitial));
     setEditingCash(true);
   };
-  const commitCash = () => {
+  const commitCash = async () => {
     const val = Math.max(0, Number(cashDraft) || 0);
     setCashInitial(val);
-    localStorage.setItem(CASH_INITIAL_KEY, String(val));
     setEditingCash(false);
+    await supabase
+      .from('app_settings')
+      .upsert({ key: 'dashboard_cash_initial', value: { amount: val } });
   };
 
   const { monday, sunday, label: weekLabel } = currentWeekRange();

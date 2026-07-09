@@ -51,9 +51,13 @@ export default function SettingsView() {
   const [tab, setTab] = useState<'empresa' | 'usuarios'>('empresa');
 
   // ── Company ──────────────────────────────────────────────────────────────
-  const [company, setCompany] = useState<CompanyInfo>(loadCompany);
+  const [company, setCompany] = useState<CompanyInfo>({ name: 'Mi Empresa', rfc: '', phone: '', address: '', logo: null });
   const [companySaving, setCompanySaving] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    loadCompany().then(setCompany);
+  }, []);
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,11 +68,12 @@ export default function SettingsView() {
     reader.readAsDataURL(file);
   };
 
-  const saveCompanyInfo = () => {
+  const saveCompanyInfo = async () => {
     if (!company.name.trim()) { push('error', 'El nombre de la empresa es obligatorio'); return; }
     setCompanySaving(true);
-    saveCompany(company);
-    setTimeout(() => { setCompanySaving(false); push('success', 'Información guardada'); }, 300);
+    await saveCompany(company);
+    setCompanySaving(false);
+    push('success', 'Información guardada');
   };
 
   // ── Users ─────────────────────────────────────────────────────────────────

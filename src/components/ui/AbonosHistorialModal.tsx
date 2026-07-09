@@ -3,7 +3,7 @@ import { Collection, Customer, Sale } from '../../lib/types';
 import { formatCurrency, formatDateTime } from '../../lib/format';
 import Modal from './Modal';
 import { useToast } from './Toast';
-import { loadCompany } from '../../lib/auth';
+import { useCompany } from '../../lib/auth';
 
 type SaleRow = Sale & { customer: Customer | null };
 
@@ -23,7 +23,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 export default function AbonosHistorialModal({ sale, collections, totalPaid, onClose }: Props) {
   const { push } = useToast();
-  const company = loadCompany();
+  const company = useCompany();
 
   const balance = (sale?.total ?? 0) - totalPaid;
   // Sort chronologically (oldest first) for historial display

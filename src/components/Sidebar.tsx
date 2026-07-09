@@ -14,7 +14,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { useState } from 'react';
-import { useAuth } from '../lib/auth';
+import { useAuth, useCompany } from '../lib/auth';
 
 export type ViewKey =
   | 'dashboard'
@@ -53,6 +53,7 @@ type SidebarProps = {
 
 export default function Sidebar({ current, onNavigate }: SidebarProps) {
   const { currentUser, logout } = useAuth();
+  const company = useCompany();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleNavigate = (view: ViewKey) => {
@@ -81,11 +82,14 @@ export default function Sidebar({ current, onNavigate }: SidebarProps) {
       >
         <div className="flex items-center justify-between px-5 h-16 border-b border-white/10">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-500 text-white shadow-lg shadow-brand-500/30">
-              <Boxes size={20} />
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white shadow-lg shadow-brand-500/30 overflow-hidden">
+              {company.logo
+                ? <img src={company.logo} alt="logo" className="h-full w-full object-contain" />
+                : <Boxes size={20} />
+              }
             </div>
-            <div>
-              <p className="text-sm font-bold tracking-tight text-white">NexoComercio</p>
+            <div className="min-w-0">
+              <p className="text-sm font-bold tracking-tight text-white truncate">{company.name}</p>
               <p className="text-[10px] uppercase tracking-wider text-ink-400">Gestión integral</p>
             </div>
           </div>
@@ -142,7 +146,7 @@ export default function Sidebar({ current, onNavigate }: SidebarProps) {
               </button>
             </div>
           )}
-          <p className="text-[11px] text-ink-500 px-1">© 2026 NexoComercio</p>
+          <p className="text-[11px] text-ink-500 px-1">© 2026 {company.name}</p>
         </div>
       </aside>
     </>

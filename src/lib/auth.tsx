@@ -22,9 +22,8 @@ export type CompanyInfo = {
   logo: string | null;
 };
 
-// ─── Company (still localStorage — single-tenant, device-level config) ────────
+// ─── Company — stored in Supabase app_settings ────────────────────────────────
 
-const COMPANY_KEY = 'app_company';
 const SESSION_KEY = 'app_session_user_id';
 
 const DEFAULT_COMPANY: CompanyInfo = {
@@ -35,17 +34,27 @@ const DEFAULT_COMPANY: CompanyInfo = {
   logo: null,
 };
 
-export function loadCompany(): CompanyInfo {
-  try {
-    const raw = localStorage.getItem(COMPANY_KEY);
-    return raw ? { ...DEFAULT_COMPANY, ...JSON.parse(raw) } : DEFAULT_COMPANY;
-  } catch {
-    return DEFAULT_COMPANY;
-  }
+export async function loadCompany(): Promise<CompanyInfo> {
+  const { data } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'company')
+    .maybeSingle();
+  return data ? { ...DEFAULT_COMPANY, ...(data.value as Partial<CompanyInfo>) } : DEFAULT_COMPANY;
 }
 
-export function saveCompany(info: CompanyInfo) {
-  localStorage.setItem(COMPANY_KEY, JSON.stringify(info));
+export async function saveCompany(info: CompanyInfo): Promise<void> {
+  await supabase
+    .from('app_settings')
+    .upsert({ key: 'company', value: info as unknown as Record<string, unknown> });
+}
+
+// ─── useCompany hook ─────────────────────────────────────────────────────────
+
+export function useCompany(): CompanyInfo {
+  const [company, setCompany] = useState<CompanyInfo>(DEFAULT_COMPANY);
+  useEffect(() => { loadCompany().then(setCompany); }, []);
+  return company;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────

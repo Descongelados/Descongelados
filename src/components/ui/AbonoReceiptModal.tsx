@@ -3,7 +3,7 @@ import { Collection, Customer, Sale } from '../../lib/types';
 import { formatCurrency, formatDateTime } from '../../lib/format';
 import Modal from './Modal';
 import { useToast } from './Toast';
-import { loadCompany } from '../../lib/auth';
+import { useCompany } from '../../lib/auth';
 
 type SaleRow = Sale & { customer: Customer | null };
 
@@ -30,7 +30,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 export default function AbonoReceiptModal({ data, onClose }: Props) {
   const { push } = useToast();
-  const company = loadCompany();
+  const company = useCompany();
 
   const share = async () => {
     if (!data) return;
