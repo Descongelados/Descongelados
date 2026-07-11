@@ -43,6 +43,7 @@ export default function Inventory() {
   const canCreate = can('inventory:create');
   const canEdit   = can('inventory:edit');
   const canDelete = can('inventory:delete');
+  const canAdjust = can('inventory:adjust');
 
   const { push } = useToast();
   const [products, setProducts] = useState<Product[] | null>(null);
@@ -200,6 +201,8 @@ export default function Inventory() {
     }
     setDeleteTarget(null);
   };
+
+  const stockFieldDisabled = !!editing && !canAdjust;
 
   return (
     <div className="animate-fade-in">
@@ -454,16 +457,21 @@ export default function Inventory() {
             })()}
           </div>
           <div>
-            <label className="label">Stock inicial</label>
+            <label className="label">Stock{editing && canAdjust ? ' (ajuste manual)' : editing ? '' : ' inicial'}</label>
             <input
-              className="input"
+              className={`input ${stockFieldDisabled ? 'bg-ink-50 text-ink-500 cursor-not-allowed' : ''}`}
               type="number"
               step="0.001"
               value={form.stock}
               onChange={(e) => setForm({ ...form, stock: e.target.value })}
-              disabled={!!editing}
+              disabled={stockFieldDisabled}
             />
-            {editing && <p className="text-xs text-ink-400 mt-1">El stock se ajusta vía compras y ventas.</p>}
+            {editing && !canAdjust && (
+              <p className="text-xs text-ink-400 mt-1">El stock se ajusta vía compras y ventas.</p>
+            )}
+            {editing && canAdjust && (
+              <p className="text-xs text-warning-600 mt-1">Ajuste manual de stock — usar con precaución.</p>
+            )}
           </div>
           <div>
             <label className="label">Stock mínimo</label>
