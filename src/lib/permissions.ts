@@ -18,7 +18,6 @@ export type Permission =
   | 'inventory:create'
   | 'inventory:edit'
   | 'inventory:delete'
-  | 'inventory:adjust'
   | 'collections:edit'
   | 'settings:manage';
 
@@ -27,7 +26,7 @@ const ALL_PERMISSIONS: Permission[] = [
   'customers:create', 'customers:edit', 'customers:delete',
   'purchases:create', 'purchases:edit', 'purchases:delete',
   'suppliers:create', 'suppliers:edit', 'suppliers:delete',
-  'inventory:create', 'inventory:edit', 'inventory:delete', 'inventory:adjust',
+  'inventory:create', 'inventory:edit', 'inventory:delete',
   'collections:edit',
   'settings:manage',
 ];
@@ -37,7 +36,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   vendedor: ['sales:create', 'customers:create'],
   compras: ['purchases:create', 'suppliers:create'],
   cobranza: ['collections:edit'],
-  supervisor: ['collections:edit', 'inventory:create', 'inventory:edit', 'inventory:adjust'],
+  supervisor: ['collections:edit', 'inventory:create', 'inventory:edit'],
 };
 
 export const ROLE_LABELS: Record<Role, string> = {
