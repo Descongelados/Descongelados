@@ -399,10 +399,6 @@ export default function Reports() {
                     <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco cobrado</span>
                     <span className="font-semibold text-ink-800">{formatCurrency(metrics.colBanco)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Wallet size={13} /> Por cobrar</span>
-                    <span className="font-semibold text-warning-700">{formatCurrency(metrics.colPorPagar)}</span>
-                  </div>
                 </div>
               </div>
 
@@ -425,12 +421,6 @@ export default function Reports() {
                   <div className="flex justify-between">
                     <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco pagado</span>
                     <span className="font-semibold text-ink-800">{formatCurrency(metrics.spBanco)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Wallet size={13} /> Por pagar</span>
-                    <span className="font-semibold text-warning-700">
-                      {formatCurrency(metrics.totalPurchases - metrics.totalPaid)}
-                    </span>
                   </div>
                 </div>
               </div>
