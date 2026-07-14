@@ -625,7 +625,7 @@ export default function Purchases() {
         >
           <ShoppingCart size={16} /> Compras
           <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
-            {(purchases ?? []).length}
+            {filtered.length}
           </span>
         </button>
         <button
@@ -638,7 +638,7 @@ export default function Purchases() {
         >
           <Wallet size={16} /> Pagos a proveedores
           <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
-            {supPayments?.length ?? 0}
+            {filteredSupPayments.length}
           </span>
         </button>
       </div>
@@ -1388,5 +1388,6 @@ export default function Purchases() {
     </div>
   );
 }
+
 
 
