@@ -119,6 +119,18 @@ export default function Collections() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const { monday: weekStart, sunday: weekEnd } = useMemo(() => {
+    const now = new Date();
+    const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diff);
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    return { monday, sunday };
+  }, []);
+
   const paidBySale = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of collections ?? []) {
@@ -137,29 +149,44 @@ export default function Collections() {
     }));
   }, [sales, paidBySale]);
 
-  const pendingDeliveries = useMemo(
-    () => salesWithBalance.filter((s) => s.delivery_status === 'pendiente'),
-    [salesWithBalance],
+  // Sales within the current week (used for entregas + cobradas tabs)
+  const salesWithBalanceWeek = useMemo(
+    () => salesWithBalance.filter((s) => {
+      const d = new Date(s.sale_date);
+      return d >= weekStart && d <= weekEnd;
+    }),
+    [salesWithBalance, weekStart, weekEnd],
   );
-  const deliveredSales = useMemo(
+
+  const pendingDeliveries = useMemo(
+    () => salesWithBalanceWeek.filter((s) => s.delivery_status === 'pendiente'),
+    [salesWithBalanceWeek],
+  );
+  const deliveredSalesWeek = useMemo(
+    () => salesWithBalanceWeek.filter((s) => s.delivery_status === 'entregado'),
+    [salesWithBalanceWeek],
+  );
+
+  // All delivered sales regardless of date — used for Cobranza (pending payment)
+  const deliveredSalesAll = useMemo(
     () => salesWithBalance.filter((s) => s.delivery_status === 'entregado'),
     [salesWithBalance],
   );
 
-  // entregadas con saldo pendiente → acción requerida en Cobranza
+  // entregadas con saldo pendiente → acción requerida en Cobranza (ALL dates)
   const pendingPaymentSales = useMemo(
-    () => deliveredSales.filter((s) => s.balance > 0.009),
-    [deliveredSales],
+    () => deliveredSalesAll.filter((s) => s.balance > 0.009),
+    [deliveredSalesAll],
   );
 
-  // entregadas y totalmente pagadas → pestaña Ventas cobradas
+  // entregadas y totalmente pagadas → pestaña Ventas cobradas (current week only)
   const paidSales = useMemo(
-    () => deliveredSales.filter((s) => s.balance <= 0.009),
-    [deliveredSales],
+    () => deliveredSalesWeek.filter((s) => s.balance <= 0.009),
+    [deliveredSalesWeek],
   );
 
   const filteredDeliveries = useMemo(() => {
-    const list = tab === 'entregas' ? pendingDeliveries : deliveredSales;
+    const list = tab === 'entregas' ? pendingDeliveries : deliveredSalesWeek;
     if (!search) return list;
     const q = search.toLowerCase();
     return list.filter(
@@ -167,7 +194,7 @@ export default function Collections() {
         s.customer?.name.toLowerCase().includes(q) ||
         s.invoice_number?.toLowerCase().includes(q),
     );
-  }, [tab, pendingDeliveries, deliveredSales, search]);
+  }, [tab, pendingDeliveries, deliveredSalesWeek, search]);
 
   const totalCollectedToday = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -353,8 +380,8 @@ export default function Collections() {
               <PackageCheck size={20} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-ink-900">{deliveredSales.length}</p>
-              <p className="text-sm text-ink-500">Entregas confirmadas</p>
+              <p className="text-2xl font-bold text-ink-900">{deliveredSalesWeek.length}</p>
+              <p className="text-sm text-ink-500">Entregas confirmadas esta semana</p>
             </div>
           </div>
         </div>
@@ -915,3 +942,4 @@ export default function Collections() {
     </div>
   );
 }
+
