@@ -13,6 +13,7 @@ import {
   Banknote,
   Building,
   CheckCircle2,
+  TrendingUp,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Product, Purchase, PurchaseItem, Supplier, SupplierPayment } from '../lib/types';
@@ -219,6 +220,22 @@ export default function Purchases() {
       }, 0),
     [purchases, paidByPurchase],
   );
+
+  const totalPaidThisWeek = useMemo(() => {
+    const now = new Date();
+    const day = now.getDay(); // 0=Sun … 6=Sat
+    const diffToMonday = (day === 0 ? -6 : 1 - day);
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    return (supPayments ?? []).reduce((acc, p) => {
+      const d = new Date(p.payment_date);
+      return d >= monday && d <= sunday ? acc + p.amount : acc;
+    }, 0);
+  }, [supPayments]);
 
   const openCreate = () => {
     setEditing(null);
@@ -519,7 +536,7 @@ export default function Purchases() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <div className="card p-5">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
@@ -552,6 +569,17 @@ export default function Purchases() {
                 {(purchases ?? []).filter((p) => Math.abs((paidByPurchase.get(p.id) ?? 0) - p.total) < 0.01).length}
               </p>
               <p className="text-sm text-ink-500">Pagadas completo</p>
+            </div>
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-50 text-accent-600">
+              <TrendingUp size={20} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalPaidThisWeek)}</p>
+              <p className="text-sm text-ink-500">Pagado esta semana</p>
             </div>
           </div>
         </div>
@@ -1342,3 +1370,4 @@ export default function Purchases() {
     </div>
   );
 }
+
