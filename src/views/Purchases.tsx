@@ -72,6 +72,18 @@ const emptySupPayForm = (): SupPayForm => ({
   notes: '',
 });
 
+function getWeekRange(): { monday: Date; sunday: Date } {
+  const now = new Date();
+  const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return { monday, sunday };
+}
+
 export default function Purchases() {
   const { can } = useAuth();
   const canCreate = can('purchases:create');
@@ -145,28 +157,34 @@ export default function Purchases() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const { monday: weekStart, sunday: weekEnd } = useMemo(() => getWeekRange(), []);
+
   const filtered = useMemo(() => {
     if (!purchases) return [];
     return purchases.filter((p) => {
+      const d = new Date(p.purchase_date);
+      const inWeek = d >= weekStart && d <= weekEnd;
       const matchesSearch =
         !search ||
         p.invoice_number?.toLowerCase().includes(search.toLowerCase()) ||
         p.supplier?.name.toLowerCase().includes(search.toLowerCase());
-      return matchesSearch;
+      return inWeek && matchesSearch;
     });
-  }, [purchases, search]);
+  }, [purchases, search, weekStart, weekEnd]);
 
   const filteredSupPayments = useMemo(() => {
     if (!supPayments) return [];
     return supPayments.filter((p) => {
+      const d = new Date(p.payment_date);
+      const inWeek = d >= weekStart && d <= weekEnd;
       const matchesSearch =
         !search ||
         p.supplier?.name.toLowerCase().includes(search.toLowerCase()) ||
         p.reference?.toLowerCase().includes(search.toLowerCase());
       const matchesMethod = methodFilter === 'all' || p.payment_method === methodFilter;
-      return matchesSearch && matchesMethod;
+      return inWeek && matchesSearch && matchesMethod;
     });
-  }, [supPayments, search, methodFilter]);
+  }, [supPayments, search, methodFilter, weekStart, weekEnd]);
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
@@ -1370,4 +1388,5 @@ export default function Purchases() {
     </div>
   );
 }
+
 
