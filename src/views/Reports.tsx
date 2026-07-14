@@ -237,7 +237,6 @@ export default function Reports() {
     if (!reportData) return null;
     const { sales, collections, purchases, supplierPayments, saleItems } = reportData;
 
-    const totalSales = sales.reduce((s, r) => s + r.total, 0);
     const totalPurchases = purchases.reduce((s, r) => s + r.total, 0);
 
     const colEfectivo = collections
@@ -250,6 +249,7 @@ export default function Reports() {
       .filter((c) => c.payment_method === 'por_pagar')
       .reduce((s, c) => s + c.amount, 0);
     const totalCollected = collections.reduce((s, c) => s + c.amount, 0);
+    const totalSales = totalCollected;
 
     const spEfectivo = supplierPayments
       .filter((p) => p.payment_method === 'efectivo')
@@ -259,7 +259,7 @@ export default function Reports() {
       .reduce((s, p) => s + p.amount, 0);
     const totalPaid = supplierPayments.reduce((s, p) => s + p.amount, 0);
 
-    const ganancia = totalSales - totalPurchases;
+    const ganancia = totalCollected - totalPurchases;
     const gananciaEfectivo = colEfectivo - spEfectivo;
     const gananciaBanco = colBanco - spBanco;
 
@@ -589,3 +589,4 @@ export default function Reports() {
     </div>
   );
 }
+
