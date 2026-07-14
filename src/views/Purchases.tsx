@@ -561,8 +561,8 @@ export default function Purchases() {
               <ShoppingCart size={20} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-ink-900">{(purchases ?? []).length}</p>
-              <p className="text-sm text-ink-500">Órdenes de compra</p>
+              <p className="text-2xl font-bold text-ink-900">{filtered.length}</p>
+              <p className="text-sm text-ink-500">Órdenes esta semana</p>
             </div>
           </div>
         </div>
@@ -584,9 +584,9 @@ export default function Purchases() {
             </div>
             <div>
               <p className="text-2xl font-bold text-ink-900">
-                {(purchases ?? []).filter((p) => Math.abs((paidByPurchase.get(p.id) ?? 0) - p.total) < 0.01).length}
+                {filtered.filter((p) => Math.abs((paidByPurchase.get(p.id) ?? 0) - p.total) < 0.01).length}
               </p>
-              <p className="text-sm text-ink-500">Pagadas completo</p>
+              <p className="text-sm text-ink-500">Pagadas esta semana</p>
             </div>
           </div>
         </div>
@@ -1388,6 +1388,7 @@ export default function Purchases() {
     </div>
   );
 }
+
 
 
 
