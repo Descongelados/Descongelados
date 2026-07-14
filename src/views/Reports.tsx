@@ -50,7 +50,7 @@ type SaleRow = {
 type CollectionRow = { amount: number; payment_method: string };
 type PurchaseRow = { total: number };
 type SupplierPaymentRow = { amount: number; payment_method: string };
-type SaleItemRow = { quantity: number; subtotal: number; product: { name: string } | null };
+type SaleItemRow = { quantity: number; unit_price: number; subtotal: number; product: { name: string; cost_price: number } | null };
 
 type ReportData = {
   sales: SaleRow[];
@@ -207,7 +207,7 @@ export default function Reports() {
       const saleIds = salesRes.data.map((s) => s.id);
       const { data: itemData } = await supabase
         .from('sale_items')
-        .select('quantity, subtotal, product:products(name)')
+        .select('quantity, unit_price, subtotal, product:products(name, cost_price)')
         .in('sale_id', saleIds);
       saleItems = (itemData ?? []) as unknown as SaleItemRow[];
     }
@@ -259,7 +259,11 @@ export default function Reports() {
       .reduce((s, p) => s + p.amount, 0);
     const totalPaid = supplierPayments.reduce((s, p) => s + p.amount, 0);
 
-    const ganancia = totalCollected - totalPurchases;
+    // Ganancia real: Σ (precio_venta − costo_compra) × cantidad  por cada línea vendida
+    const ganancia = saleItems.reduce((acc, it) => {
+      const costPrice = it.product?.cost_price ?? 0;
+      return acc + (it.unit_price - costPrice) * it.quantity;
+    }, 0);
     const gananciaEfectivo = colEfectivo - spEfectivo;
     const gananciaBanco = colBanco - spBanco;
 
