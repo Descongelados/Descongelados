@@ -46,6 +46,18 @@ const generateInvoiceNumber = (existing: SaleRow[]): string => {
   return `${prefix}${String(maxNum + 1).padStart(4, '0')}`;
 };
 
+function getWeekRange(): { monday: Date; sunday: Date } {
+  const now = new Date();
+  const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return { monday, sunday };
+}
+
 export default function Sales() {
   const { can } = useAuth();
   const canCreate = can('sales:create');
@@ -98,16 +110,25 @@ export default function Sales() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const { monday: weekStart, sunday: weekEnd } = useMemo(() => getWeekRange(), []);
+
   const filtered = useMemo(() => {
     if (!sales) return [];
     return sales.filter((s) => {
+      const d = new Date(s.sale_date);
+      const inWeek = d >= weekStart && d <= weekEnd;
       const matchesSearch =
         !search ||
         s.invoice_number?.toLowerCase().includes(search.toLowerCase()) ||
         s.customer?.name.toLowerCase().includes(search.toLowerCase());
-      return matchesSearch;
+      return inWeek && matchesSearch;
     });
-  }, [sales, search]);
+  }, [sales, search, weekStart, weekEnd]);
+
+  const totalCollectedThisWeek = useMemo(
+    () => filtered.reduce((acc, s) => acc + s.total, 0),
+    [filtered],
+  );
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
@@ -284,6 +305,31 @@ export default function Sales() {
           )
         }
       />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+              <TrendingUp size={20} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalCollectedThisWeek)}</p>
+              <p className="text-sm text-ink-500">Recaudado esta semana</p>
+            </div>
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-success-50 text-success-600">
+              <Receipt size={20} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-ink-900">{filtered.length}</p>
+              <p className="text-sm text-ink-500">Ventas esta semana</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {(customers.length === 0 || products.length === 0) && !loading && (
         <div className="card p-4 mb-4 flex items-start gap-3 bg-warning-50 border-warning-200">
@@ -675,3 +721,4 @@ export default function Sales() {
     </div>
   );
 }
+
