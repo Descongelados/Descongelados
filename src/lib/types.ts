@@ -167,3 +167,17 @@ export type SupplierPaymentWithSupplier = SupplierPayment & {
   supplier?: Supplier;
   purchase?: Purchase;
 };
+
+export type InventoryLog = {
+  id: string;
+  product_id: string | null;
+  product_name: string;
+  product_sku: string;
+  action: 'created' | 'edited' | 'deleted' | 'purchase' | 'sale';
+  stock_before: number | null;
+  stock_after: number | null;
+  delta: number | null;
+  changed_by: string | null;
+  notes: string | null;
+  created_at: string;
+};

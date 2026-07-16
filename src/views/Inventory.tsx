@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Plus, Pencil, Trash2, Search, Filter, DollarSign, TrendingUp, BarChart2, ShoppingBag } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Search, Filter, DollarSign, TrendingUp, BarChart2, ShoppingBag, ClipboardList, ArrowUp, ArrowDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Product } from '../lib/types';
-import { formatCurrency, formatNumber } from '../lib/format';
+import { Product, InventoryLog } from '../lib/types';
+import { formatCurrency, formatNumber, formatDateTime } from '../lib/format';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
@@ -39,7 +39,7 @@ const emptyForm: FormState = {
   is_active: true,
 };
 
-type Tab = 'list' | 'value';
+type Tab = 'list' | 'value' | 'log';
 
 // ─── Inventory Value Tab ─────────────────────────────────────────────────────
 
@@ -225,8 +225,159 @@ function InventoryValueTab({ products }: { products: Product[] }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+// ─── Inventory Log Tab ───────────────────────────────────────────────────────
+
+const ACTION_LABELS: Record<InventoryLog['action'], string> = {
+  created:  'Creado',
+  edited:   'Editado',
+  deleted:  'Eliminado',
+  purchase: 'Compra',
+  sale:     'Venta',
+};
+
+const ACTION_COLORS: Record<InventoryLog['action'], string> = {
+  created:  'bg-brand-100 text-brand-700',
+  edited:   'bg-warning-100 text-warning-700',
+  deleted:  'bg-danger-100 text-danger-700',
+  purchase: 'bg-success-100 text-success-700',
+  sale:     'bg-accent-100 text-accent-700',
+};
+
+function InventoryLogTab() {
+  const [logs, setLogs] = useState<InventoryLog[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionFilter, setActionFilter] = useState<string>('all');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from('inventory_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      setLogs((data ?? []) as InventoryLog[]);
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!logs) return [];
+    return logs.filter((l) => {
+      const matchesAction = actionFilter === 'all' || l.action === actionFilter;
+      const matchesSearch =
+        !search ||
+        l.product_name.toLowerCase().includes(search.toLowerCase()) ||
+        l.product_sku.toLowerCase().includes(search.toLowerCase());
+      return matchesAction && matchesSearch;
+    });
+  }, [logs, actionFilter, search]);
+
+  if (loading) return <FullPageLoader />;
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="card p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+            <input
+              className="input pl-9"
+              placeholder="Buscar por producto o SKU…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <select
+            className="input w-auto"
+            value={actionFilter}
+            onChange={(e) => setActionFilter(e.target.value)}
+          >
+            <option value="all">Todas las acciones</option>
+            <option value="created">Creado</option>
+            <option value="edited">Editado</option>
+            <option value="deleted">Eliminado</option>
+            <option value="purchase">Compra</option>
+            <option value="sale">Venta</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="card overflow-hidden">
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={ClipboardList}
+            title="Sin movimientos"
+            description="Los cambios en el inventario aparecerán aquí."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-ink-100">
+              <thead className="bg-ink-50/60">
+                <tr>
+                  <th className="table-head">Fecha</th>
+                  <th className="table-head">Producto</th>
+                  <th className="table-head">Acción</th>
+                  <th className="table-head text-right">Stock anterior</th>
+                  <th className="table-head text-right">Stock nuevo</th>
+                  <th className="table-head text-right">Cambio</th>
+                  <th className="table-head">Usuario</th>
+                  <th className="table-head">Notas</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {filtered.map((l) => {
+                  const delta = l.delta ?? 0;
+                  return (
+                    <tr key={l.id} className="hover:bg-ink-50/60 transition">
+                      <td className="table-cell text-xs text-ink-500 whitespace-nowrap">
+                        {formatDateTime(l.created_at)}
+                      </td>
+                      <td className="table-cell">
+                        <div className="font-semibold text-ink-900">{l.product_name}</div>
+                        <div className="text-xs text-ink-500">SKU {l.product_sku}</div>
+                      </td>
+                      <td className="table-cell">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${ACTION_COLORS[l.action]}`}>
+                          {ACTION_LABELS[l.action]}
+                        </span>
+                      </td>
+                      <td className="table-cell text-right text-ink-700">
+                        {l.stock_before != null ? formatNumber(l.stock_before, 3) : '—'}
+                      </td>
+                      <td className="table-cell text-right text-ink-700">
+                        {l.stock_after != null ? formatNumber(l.stock_after, 3) : '—'}
+                      </td>
+                      <td className="table-cell text-right font-semibold">
+                        {l.stock_before != null && l.stock_after != null ? (
+                          <span className={`flex items-center justify-end gap-0.5 ${delta > 0 ? 'text-success-600' : delta < 0 ? 'text-danger-600' : 'text-ink-400'}`}>
+                            {delta > 0 ? <ArrowUp size={13} /> : delta < 0 ? <ArrowDown size={13} /> : null}
+                            {delta > 0 ? '+' : ''}{formatNumber(delta, 3)}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="table-cell text-ink-600 text-sm">{l.changed_by ?? '—'}</td>
+                      <td className="table-cell text-ink-500 text-xs">{l.notes ?? '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function Inventory() {
-  const { can } = useAuth();
+  const { can, currentUser } = useAuth();
   const canCreate = can('inventory:create');
   const canEdit   = can('inventory:edit');
   const canDelete = can('inventory:delete');
@@ -345,6 +496,21 @@ export default function Inventory() {
       if (error) {
         push('error', 'No se pudo actualizar el producto');
       } else {
+        // Log: edited
+        const changes: string[] = [];
+        if (editing.stock !== basePayload.stock) changes.push(`stock: ${editing.stock} → ${basePayload.stock}`);
+        if (editing.cost_price !== basePayload.cost_price) changes.push(`costo: ${editing.cost_price} → ${basePayload.cost_price}`);
+        if (editing.sale_price !== basePayload.sale_price) changes.push(`precio: ${editing.sale_price} → ${basePayload.sale_price}`);
+        await supabase.from('inventory_logs').insert({
+          product_id:   editing.id,
+          product_name: basePayload.name,
+          product_sku:  editing.sku,
+          action:       'edited',
+          stock_before: editing.stock,
+          stock_after:  basePayload.stock,
+          changed_by:   currentUser?.name ?? null,
+          notes:        changes.length > 0 ? changes.join(' · ') : 'Sin cambios de stock',
+        });
         push('success', 'Producto actualizado');
         setModalOpen(false);
         load();
@@ -354,7 +520,11 @@ export default function Inventory() {
       let success = false;
       while (attempt < 3 && !success) {
         const sku = attempt === 0 ? form.sku : await generateNextSku();
-        const { error } = await supabase.from('products').insert({ ...basePayload, sku });
+        const { data: inserted, error } = await supabase
+          .from('products')
+          .insert({ ...basePayload, sku })
+          .select('id')
+          .single();
         if (error && error.message.includes('duplicate')) {
           attempt += 1;
           if (attempt >= 3) {
@@ -367,6 +537,17 @@ export default function Inventory() {
           push('error', 'No se pudo crear el producto');
           break;
         } else {
+          // Log: created
+          await supabase.from('inventory_logs').insert({
+            product_id:   inserted?.id ?? null,
+            product_name: basePayload.name,
+            product_sku:  sku,
+            action:       'created',
+            stock_before: 0,
+            stock_after:  basePayload.stock,
+            changed_by:   currentUser?.name ?? null,
+            notes:        null,
+          });
           push('success', 'Producto creado');
           setModalOpen(false);
           load();
@@ -383,6 +564,17 @@ export default function Inventory() {
     if (error) {
       push('error', 'No se pudo eliminar (puede estar referenciado en compras/ventas)');
     } else {
+      // Log: deleted (product_id SET NULL via ON DELETE SET NULL, guardamos datos antes)
+      await supabase.from('inventory_logs').insert({
+        product_id:   null,
+        product_name: deleteTarget.name,
+        product_sku:  deleteTarget.sku,
+        action:       'deleted',
+        stock_before: deleteTarget.stock,
+        stock_after:  0,
+        changed_by:   currentUser?.name ?? null,
+        notes:        null,
+      });
       push('success', 'Producto eliminado');
       load();
     }
@@ -423,12 +615,25 @@ export default function Inventory() {
         >
           Valor del inventario
         </button>
+        <button
+          onClick={() => setTab('log')}
+          className={`px-4 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${
+            tab === 'log'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-ink-500 hover:text-ink-800'
+          }`}
+        >
+          Historial
+        </button>
       </div>
 
       {/* Tab: Valor del inventario */}
       {tab === 'value' && (
         loading ? <FullPageLoader /> : <InventoryValueTab products={products ?? []} />
       )}
+
+      {/* Tab: Historial de movimientos */}
+      {tab === 'log' && <InventoryLogTab />}
 
       {/* Tab: Lista de productos */}
       {tab === 'list' && (
