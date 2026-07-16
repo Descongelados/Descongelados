@@ -10,6 +10,7 @@ import {
   PackageCheck,
   AlertCircle,
   Receipt,
+  Pencil,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Collection, Customer, Sale } from '../lib/types';
@@ -63,7 +64,9 @@ const emptyPaymentForm = (): PaymentForm => ({
   notes: '',
 });
 
-export default function Collections() {
+type Props = { onDataChanged?: () => void };
+
+export default function Collections({ onDataChanged }: Props) {
   const { can } = useAuth();
   const canEdit = can('collections:edit');
   const { push } = useToast();
@@ -167,22 +170,44 @@ export default function Collections() {
     [salesWithBalanceWeek],
   );
 
-  // All delivered sales regardless of date — used for Cobranza (pending payment)
+  // All delivered sales regardless of date - used for Cobranza (pending payment)
   const deliveredSalesAll = useMemo(
     () => salesWithBalance.filter((s) => s.delivery_status === 'entregado'),
     [salesWithBalance],
   );
 
-  // entregadas con saldo pendiente → acción requerida en Cobranza (ALL dates)
+  // entregadas con saldo pendiente — acción requerida en Cobranza (ALL dates)
   const pendingPaymentSales = useMemo(
     () => deliveredSalesAll.filter((s) => s.balance > 0.009),
     [deliveredSalesAll],
   );
 
-  // entregadas y totalmente pagadas → pestaña Ventas cobradas (current week only)
+  // entregadas y totalmente pagadas — pestaña Ventas cobradas (current week only)
   const paidSales = useMemo(
     () => deliveredSalesWeek.filter((s) => s.balance <= 0.009),
     [deliveredSalesWeek],
+  );
+
+  // Registros de cobranza de ventas pendientes de pago (para la sección de historial en Cobranza)
+  const pendingPaymentSaleIds = useMemo(
+    () => new Set(pendingPaymentSales.map((s) => s.id)),
+    [pendingPaymentSales],
+  );
+
+  // Registros de cobranza de ventas ya pagadas (para pestaña Ventas cobradas)
+  const paidSaleIds = useMemo(
+    () => new Set(paidSales.map((s) => s.id)),
+    [paidSales],
+  );
+
+  const collectionsForPending = useMemo(
+    () => (collections ?? []).filter((c) => c.sale_id && pendingPaymentSaleIds.has(c.sale_id)),
+    [collections, pendingPaymentSaleIds],
+  );
+
+  const collectionsForPaid = useMemo(
+    () => (collections ?? []).filter((c) => c.sale_id && paidSaleIds.has(c.sale_id)),
+    [collections, paidSaleIds],
   );
 
   const filteredDeliveries = useMemo(() => {
@@ -224,6 +249,23 @@ export default function Collections() {
     setPaymentOpen(true);
   };
 
+  const openEditCollectionPayment = (col: CollectionRow) => {
+    setPaymentTarget(null);
+    setEditPayment(col);
+    setPaymentForm({
+      customer_id: col.customer_id ?? '',
+      sale_id: col.sale_id ?? '',
+      method: col.payment_method ?? 'efectivo',
+      amount: String(col.amount),
+      efectivo: '0',
+      banco: '0',
+      por_pagar: '0',
+      reference: col.reference ?? '',
+      payment_date: toDateInputValue(new Date(col.collection_date)),
+      notes: col.notes ?? '',
+    });
+    setPaymentOpen(true);
+  };
 
   const combinedTotal = useMemo(() => {
     const e = Number(paymentForm.efectivo) || 0;
@@ -256,7 +298,8 @@ export default function Collections() {
       else {
         push('success', 'Pago actualizado');
         setPaymentOpen(false);
-        load();
+        await load();
+        onDataChanged?.();
       }
       setSaving(false);
       return;
@@ -289,7 +332,8 @@ export default function Collections() {
       else {
         push('success', 'Pago combinado registrado');
         setPaymentOpen(false);
-        load();
+        await load();
+        onDataChanged?.();
       }
       setSaving(false);
       return;
@@ -318,7 +362,8 @@ export default function Collections() {
     else {
       push('success', 'Pago registrado');
       setPaymentOpen(false);
-      load();
+      await load();
+      onDataChanged?.();
     }
     setSaving(false);
   };
@@ -333,7 +378,8 @@ export default function Collections() {
       push('error', 'No se pudo confirmar la entrega');
     } else {
       push('success', 'Entrega confirmada');
-      load();
+      await load();
+      onDataChanged?.();
       setTab('cobranza');
     }
     setConfirmDelivery(null);
@@ -345,7 +391,8 @@ export default function Collections() {
     if (error) push('error', 'No se pudo eliminar el pago');
     else {
       push('success', 'Pago eliminado');
-      load();
+      await load();
+      onDataChanged?.();
     }
     setDeleteTarget(null);
   };
@@ -471,7 +518,7 @@ export default function Collections() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
             <input
               className="input pl-9"
-              placeholder={tab === 'entregas' ? 'Buscar por cliente o folio…' : 'Buscar por cliente o referencia…'}
+              placeholder={tab === 'entregas' ? 'Buscar por cliente o folio.' : 'Buscar por cliente o referencia.'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -511,8 +558,8 @@ export default function Collections() {
                 <tbody className="divide-y divide-ink-100">
                   {filteredDeliveries.map((s) => (
                     <tr key={s.id} className="hover:bg-ink-50/60 transition">
-                      <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
-                      <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
+                      <td className="table-cell font-mono text-xs">{s.invoice_number ?? '-'}</td>
+                      <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '-'}</td>
                       <td className="table-cell">{formatDate(s.sale_date)}</td>
                       <td className="table-cell text-right">{formatCurrency(s.total)}</td>
                       <td className="table-cell text-right text-success-600">{formatCurrency(s.paid)}</td>
@@ -569,12 +616,12 @@ export default function Collections() {
         </div>
       ) : tab === 'cobranza' ? (
         <div className="space-y-4">
-          {/* Ventas entregadas con saldo pendiente — requieren acción */}
+          {/* Ventas entregadas con saldo pendiente - requieren acción */}
           {pendingPaymentSales.length > 0 && (
             <div className="card overflow-hidden border-danger-200">
               <div className="flex items-center gap-2 px-5 py-3 border-b border-danger-100 bg-danger-50">
                 <AlertCircle size={16} className="text-danger-600" />
-                <h3 className="text-sm font-semibold text-danger-700">Requieren acción · Por cobrar</h3>
+                <h3 className="text-sm font-semibold text-danger-700">Requieren acción — Por cobrar</h3>
                 <span className="ml-auto rounded-full bg-danger-500 px-2 py-0.5 text-xs font-semibold text-white">
                   {pendingPaymentSales.length}
                 </span>
@@ -595,8 +642,8 @@ export default function Collections() {
                   <tbody className="divide-y divide-danger-100">
                     {pendingPaymentSales.map((s) => (
                       <tr key={s.id} className="hover:bg-danger-50/30 transition">
-                        <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
-                        <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
+                        <td className="table-cell font-mono text-xs">{s.invoice_number ?? '-'}</td>
+                        <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '-'}</td>
                         <td className="table-cell">{formatDate(s.sale_date)}</td>
                         <td className="table-cell text-right">{formatCurrency(s.total)}</td>
                         <td className="table-cell text-right text-success-600">{formatCurrency(s.paid)}</td>
@@ -631,6 +678,59 @@ export default function Collections() {
             </div>
           )}
 
+          {/* Historial de cobros parciales de ventas pendientes */}
+          {collectionsForPending.length > 0 && (
+            <div className="card overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-ink-50">
+                <Wallet size={16} className="text-brand-600" />
+                <h3 className="text-sm font-semibold text-ink-700">Cobros registrados (ventas pendientes)</h3>
+                <span className="ml-auto rounded-full bg-ink-200 px-2 py-0.5 text-xs font-semibold text-ink-600">
+                  {collectionsForPending.length}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-ink-100">
+                  <thead className="bg-ink-50/60">
+                    <tr>
+                      <th className="table-head">Fecha</th>
+                      <th className="table-head">Cliente</th>
+                      <th className="table-head">Folio venta</th>
+                      <th className="table-head">Método</th>
+                      <th className="table-head text-right">Monto</th>
+                      <th className="table-head">Referencia</th>
+                      <th className="table-head">Notas</th>
+                      {canEdit && <th className="table-head text-right">Acciones</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {collectionsForPending.map((col) => (
+                      <tr key={col.id} className="hover:bg-ink-50/60 transition">
+                        <td className="table-cell">{formatDate(col.collection_date)}</td>
+                        <td className="table-cell font-semibold text-ink-900">{col.customer?.name ?? '-'}</td>
+                        <td className="table-cell font-mono text-xs">{col.sale?.invoice_number ?? '-'}</td>
+                        <td className="table-cell capitalize">{col.payment_method ?? '-'}</td>
+                        <td className="table-cell text-right font-semibold text-success-600">{formatCurrency(col.amount)}</td>
+                        <td className="table-cell text-ink-500">{col.reference ?? '-'}</td>
+                        <td className="table-cell text-ink-500">{col.notes ?? '-'}</td>
+                        {canEdit && (
+                          <td className="table-cell text-right">
+                            <button
+                              onClick={() => openEditCollectionPayment(col)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                              title="Modificar cobro"
+                            >
+                              <Pencil size={13} /> Modificar
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {pendingPaymentSales.length === 0 && (
             <div className="card p-5">
               <EmptyState
@@ -643,58 +743,113 @@ export default function Collections() {
         </div>
       ) : (
         /* ── Pestaña: Ventas cobradas ── */
-        <div className="card overflow-hidden">
-          {loading ? (
-            <FullPageLoader />
-          ) : paidSales.length === 0 ? (
-            <EmptyState
-              icon={CheckCircle2}
-              title="Sin ventas cobradas aún"
-              description="Las ventas entregadas y completamente pagadas aparecerán aquí."
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-ink-100">
-                <thead className="bg-ink-50/60">
-                  <tr>
-                    <th className="table-head">Folio</th>
-                    <th className="table-head">Cliente</th>
-                    <th className="table-head">Fecha</th>
-                    <th className="table-head text-right">Total</th>
-                    <th className="table-head text-right">Total cobrado</th>
-                    <th className="table-head">Estado</th>
-                    <th className="table-head text-right">Ticket</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {paidSales.map((s) => (
-                    <tr key={s.id} className="hover:bg-ink-50/60 transition">
-                      <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
-                      <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
-                      <td className="table-cell">{formatDate(s.sale_date)}</td>
-                      <td className="table-cell text-right">{formatCurrency(s.total)}</td>
-                      <td className="table-cell text-right font-semibold text-success-600">
-                        {formatCurrency(s.paid)}
-                      </td>
-                      <td className="table-cell">
-                        <Badge variant="success">
-                          <CheckCircle2 size={12} /> Cobrada
-                        </Badge>
-                      </td>
-                      <td className="table-cell text-right">
-                        <button
-                          onClick={() => setReceiptSale(s)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
-                          aria-label="Ver ticket"
-                          title="Ver ticket"
-                        >
-                          <Receipt size={16} />
-                        </button>
-                      </td>
+        <div className="space-y-4">
+          <div className="card overflow-hidden">
+            {loading ? (
+              <FullPageLoader />
+            ) : paidSales.length === 0 ? (
+              <EmptyState
+                icon={CheckCircle2}
+                title="Sin ventas cobradas aún"
+                description="Las ventas entregadas y completamente pagadas aparecerán aquí."
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-ink-100">
+                  <thead className="bg-ink-50/60">
+                    <tr>
+                      <th className="table-head">Folio</th>
+                      <th className="table-head">Cliente</th>
+                      <th className="table-head">Fecha</th>
+                      <th className="table-head text-right">Total</th>
+                      <th className="table-head text-right">Total cobrado</th>
+                      <th className="table-head">Estado</th>
+                      <th className="table-head text-right">Ticket</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {paidSales.map((s) => (
+                      <tr key={s.id} className="hover:bg-ink-50/60 transition">
+                        <td className="table-cell font-mono text-xs">{s.invoice_number ?? '-'}</td>
+                        <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '-'}</td>
+                        <td className="table-cell">{formatDate(s.sale_date)}</td>
+                        <td className="table-cell text-right">{formatCurrency(s.total)}</td>
+                        <td className="table-cell text-right font-semibold text-success-600">
+                          {formatCurrency(s.paid)}
+                        </td>
+                        <td className="table-cell">
+                          <Badge variant="success">
+                            <CheckCircle2 size={12} /> Cobrada
+                          </Badge>
+                        </td>
+                        <td className="table-cell text-right">
+                          <button
+                            onClick={() => setReceiptSale(s)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                            aria-label="Ver ticket"
+                            title="Ver ticket"
+                          >
+                            <Receipt size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Detalle de cobros de ventas ya pagadas */}
+          {collectionsForPaid.length > 0 && (
+            <div className="card overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-success-50">
+                <CheckCircle2 size={16} className="text-success-600" />
+                <h3 className="text-sm font-semibold text-success-700">Detalle de cobros (esta semana)</h3>
+                <span className="ml-auto rounded-full bg-success-200 px-2 py-0.5 text-xs font-semibold text-success-700">
+                  {collectionsForPaid.length}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-ink-100">
+                  <thead className="bg-success-50/40">
+                    <tr>
+                      <th className="table-head">Fecha</th>
+                      <th className="table-head">Cliente</th>
+                      <th className="table-head">Folio venta</th>
+                      <th className="table-head">Método</th>
+                      <th className="table-head text-right">Monto</th>
+                      <th className="table-head">Referencia</th>
+                      <th className="table-head">Notas</th>
+                      {canEdit && <th className="table-head text-right">Acciones</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {collectionsForPaid.map((col) => (
+                      <tr key={col.id} className="hover:bg-success-50/20 transition">
+                        <td className="table-cell">{formatDate(col.collection_date)}</td>
+                        <td className="table-cell font-semibold text-ink-900">{col.customer?.name ?? '-'}</td>
+                        <td className="table-cell font-mono text-xs">{col.sale?.invoice_number ?? '-'}</td>
+                        <td className="table-cell capitalize">{col.payment_method ?? '-'}</td>
+                        <td className="table-cell text-right font-semibold text-success-600">{formatCurrency(col.amount)}</td>
+                        <td className="table-cell text-ink-500">{col.reference ?? '-'}</td>
+                        <td className="table-cell text-ink-500">{col.notes ?? '-'}</td>
+                        {canEdit && (
+                          <td className="table-cell text-right">
+                            <button
+                              onClick={() => openEditCollectionPayment(col)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                              title="Modificar cobro"
+                            >
+                              <Pencil size={13} /> Modificar
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -706,7 +861,7 @@ export default function Collections() {
         title={editPayment ? 'Editar pago' : 'Registrar pago'}
         description={
           paymentTarget
-            ? `Venta ${paymentTarget.invoice_number ?? '—'} · ${paymentTarget.customer?.name ?? ''}`
+            ? `Venta ${paymentTarget.invoice_number ?? '-'} · ${paymentTarget.customer?.name ?? ''}`
             : 'Edita los datos del pago'
         }
         size="lg"
@@ -768,7 +923,7 @@ export default function Collections() {
                     .filter((s) => s.customer_id === paymentForm.customer_id)
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.invoice_number ?? 'Sin folio'} · {formatCurrency(s.total)}
+                        {s.invoice_number ?? 'Sin folio'} — {formatCurrency(s.total)}
                       </option>
                     ))}
                 </select>
@@ -942,4 +1097,3 @@ export default function Collections() {
     </div>
   );
 }
-
