@@ -52,7 +52,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   vendedor: 'Puede ver todo y crear ventas y clientes',
   compras: 'Puede ver todo y crear compras y proveedores',
   cobranza: 'Puede ver todo y gestionar entregas y cobranza',
-  supervisor: 'Puede ver todo, gestionar cobranza y agregar productos',
+  supervisor: 'Puede ver todo, gestionar cobranza y agregar/editar productos',
 };
 
 export const ROLE_COLORS: Record<Role, string> = {
@@ -66,5 +66,8 @@ export const ROLE_COLORS: Record<Role, string> = {
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
 export function hasPermission(roles: Role[], permission: Permission): boolean {
-  return roles.some((role) => ROLE_PERMISSIONS[role].includes(permission));
+  return roles.some((role) => {
+    const perms = ROLE_PERMISSIONS[role];
+    return perms !== undefined && perms.includes(permission);
+  });
 }
