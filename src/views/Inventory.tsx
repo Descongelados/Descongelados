@@ -678,16 +678,15 @@ export default function Inventory() {
             })()}
           </div>
           <div>
-            <label className="label">Stock inicial</label>
+            <label className="label">Stock actual</label>
             <input
               className="input"
               type="number"
               step="0.001"
               value={form.stock}
               onChange={(e) => setForm({ ...form, stock: e.target.value })}
-              disabled={!!editing}
             />
-            {editing && <p className="text-xs text-ink-400 mt-1">El stock se ajusta vía compras y ventas.</p>}
+            {editing && <p className="text-xs text-ink-400 mt-1">Ajuste manual de inventario físico.</p>}
           </div>
           <div>
             <label className="label">Stock mínimo</label>
