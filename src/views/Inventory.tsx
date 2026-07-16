@@ -480,9 +480,11 @@ export default function Inventory() {
                 title="Sin productos"
                 description="Agrega tu primer producto para empezar a controlar el inventario."
                 action={
-                  <button className="btn-primary" onClick={openCreate}>
-                    <Plus size={16} /> Nuevo producto
-                  </button>
+                  canCreate ? (
+                    <button className="btn-primary" onClick={openCreate}>
+                      <Plus size={16} /> Nuevo producto
+                    </button>
+                  ) : undefined
                 }
               />
             ) : (
