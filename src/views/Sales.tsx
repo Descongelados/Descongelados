@@ -90,7 +90,7 @@ export default function Sales() {
   const load = async () => {
     setLoading(true);
     const [sRes, cRes, prodRes] = await Promise.all([
-      supabase.from('sales').select('*, customer:customers(*)').order('sale_date', { ascending: false }),
+      supabase.from('sales').select('*, customer:customers(*)').neq('delivery_status', 'entregado').order('sale_date', { ascending: false }),
       supabase.from('customers').select('*').order('name'),
       supabase.from('products').select('*').order('name'),
     ]);
