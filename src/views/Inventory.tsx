@@ -255,7 +255,7 @@ function InventoryLogTab() {
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
-  const [dateRange, setDateRange] = useState<string>('3');
+  const [dateRange, setDateRange] = useState<string>('0');
 
   useEffect(() => {
     const load = async () => {
