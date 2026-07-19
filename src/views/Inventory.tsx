@@ -260,6 +260,96 @@ function InventoryLogTab() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+
+      // ── Backfill: insert missing logs from sales this week ──────────────
+      try {
+        const now = new Date();
+        const monday = new Date(now);
+        const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+        monday.setDate(now.getDate() + diff);
+        monday.setHours(0, 0, 0, 0);
+
+        // fetch sale_items for sales this week
+        const { data: saleItems } = await supabase
+          .from('sale_items')
+          .select('product_id, quantity, sale:sales!inner(id, invoice_number, sale_date)')
+          .gte('sale.sale_date', monday.toISOString());
+
+        // fetch purchase_items for purchases this week
+        const { data: purchaseItems } = await supabase
+          .from('purchase_items')
+          .select('product_id, quantity, purchase:purchases!inner(id, invoice_number, purchase_date)')
+          .gte('purchase.purchase_date', monday.toISOString());
+
+        // fetch existing logs this week to avoid duplicates
+        const { data: existingLogs } = await supabase
+          .from('inventory_logs')
+          .select('notes')
+          .gte('created_at', monday.toISOString());
+
+        const existingNotes = new Set((existingLogs ?? []).map((l: { notes: string | null }) => l.notes ?? ''));
+
+        // fetch products for name/sku
+        const { data: prods } = await supabase.from('products').select('id, name, sku');
+        const prodMap = new Map((prods ?? []).map((p: { id: string; name: string; sku: string }) => [p.id, p]));
+
+        type SaleRow     = { id: string; invoice_number: string | null; sale_date: string };
+        type PurchaseRow = { id: string; invoice_number: string | null; purchase_date: string };
+        type SaleItemRaw     = { product_id: string; quantity: number; sale: SaleRow[] };
+        type PurchaseItemRaw = { product_id: string; quantity: number; purchase: PurchaseRow[] };
+
+        const logsToInsert: object[] = [];
+
+        for (const si of ((saleItems ?? []) as unknown as SaleItemRaw[])) {
+          const sale = Array.isArray(si.sale) ? si.sale[0] : si.sale as unknown as SaleRow;
+          if (!sale) continue;
+          const folio = sale.invoice_number ?? sale.id;
+          const noteKey = `Venta ${folio}`;
+          if (existingNotes.has(noteKey)) continue;
+          const prod = prodMap.get(si.product_id);
+          logsToInsert.push({
+            product_id:   si.product_id,
+            product_name: prod?.name ?? 'Producto eliminado',
+            product_sku:  prod?.sku  ?? 'N/A',
+            action:       'sale',
+            stock_before: 0,
+            stock_after:  0,
+            changed_by:   null,
+            notes:        noteKey,
+            created_at:   sale.sale_date,
+          });
+          existingNotes.add(noteKey);
+        }
+
+        for (const pi of ((purchaseItems ?? []) as unknown as PurchaseItemRaw[])) {
+          const purchase = Array.isArray(pi.purchase) ? pi.purchase[0] : pi.purchase as unknown as PurchaseRow;
+          if (!purchase) continue;
+          const folio = purchase.invoice_number ?? purchase.id;
+          const noteKey = `Compra ${folio}`;
+          if (existingNotes.has(noteKey)) continue;
+          const prod = prodMap.get(pi.product_id);
+          logsToInsert.push({
+            product_id:   pi.product_id,
+            product_name: prod?.name ?? 'Producto eliminado',
+            product_sku:  prod?.sku  ?? 'N/A',
+            action:       'purchase',
+            stock_before: 0,
+            stock_after:  0,
+            changed_by:   null,
+            notes:        noteKey,
+            created_at:   purchase.purchase_date,
+          });
+          existingNotes.add(noteKey);
+        }
+
+        if (logsToInsert.length > 0) {
+          await supabase.from('inventory_logs').insert(logsToInsert);
+        }
+      } catch {
+        // backfill failure should not block the tab from loading
+      }
+      // ── End backfill ─────────────────────────────────────────────────────
+
       let query = supabase
         .from('inventory_logs')
         .select('*')
