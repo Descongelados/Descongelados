@@ -149,7 +149,7 @@ export default function Sales() {
       sale_date: toDateInputValue(new Date()),
       notes: '',
       status: 'confirmada',
-      has_tax: true,
+      has_tax: false,
     });
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
     setModalOpen(true);
