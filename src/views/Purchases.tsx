@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ShoppingCart,
   Plus,
@@ -26,81 +26,6 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../components/ui/Toast';
 import { FullPageLoader } from '../components/ui/Spinner';
 import { useAuth } from '../lib/auth';
-
-// --------------- Combobox ---------------
-type ComboboxOption = { value: string; label: string; sub?: string; disabled?: boolean };
-
-function Combobox({
-  options,
-  value,
-  onChange,
-  placeholder = 'Buscar…',
-}: {
-  options: ComboboxOption[];
-  value: string;
-  onChange: (val: string) => void;
-  placeholder?: string;
-}) {
-  const selected = options.find((o) => o.value === value);
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const filtered = query.trim()
-    ? options.filter(
-        (o) =>
-          o.label.toLowerCase().includes(query.toLowerCase()) ||
-          (o.sub ?? '').toLowerCase().includes(query.toLowerCase()),
-      )
-    : options;
-
-  const handleSelect = (o: ComboboxOption) => {
-    if (o.disabled) return;
-    onChange(o.value);
-    setQuery('');
-    setOpen(false);
-  };
-
-  return (
-    <div ref={ref} className="relative">
-      <input
-        className="input w-full"
-        value={open ? query : (selected?.label ?? '')}
-        placeholder={placeholder}
-        onFocus={() => { setQuery(''); setOpen(true); }}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-      />
-      {open && (
-        <ul className="absolute z-50 mt-1 w-full rounded-lg border border-ink-200 bg-white shadow-lg max-h-52 overflow-y-auto text-sm">
-          {filtered.length === 0 && (
-            <li className="px-3 py-2 text-ink-400">Sin resultados</li>
-          )}
-          {filtered.map((o) => (
-            <li
-              key={o.value}
-              onMouseDown={() => handleSelect(o)}
-              className={`px-3 py-2 cursor-pointer flex justify-between items-center gap-2
-                ${o.disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-brand-50 hover:text-brand-700'}
-                ${o.value === value ? 'bg-brand-50 font-semibold' : ''}`}
-            >
-              <span>{o.label}</span>
-              {o.sub && <span className="text-xs text-ink-400 shrink-0">{o.sub}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-// ----------------------------------------
 
 type PurchaseRow = Purchase & { supplier: Supplier | null };
 type ItemRow = {
@@ -160,7 +85,7 @@ function getWeekRange(): { monday: Date; sunday: Date } {
 }
 
 export default function Purchases() {
-  const { can, currentUser } = useAuth();
+  const { can } = useAuth();
   const canCreate = can('purchases:create');
   const canEdit   = can('purchases:edit');
   const canDelete = can('purchases:delete');
@@ -195,7 +120,7 @@ export default function Purchases() {
     purchase_date: toDateInputValue(new Date()),
     notes: '',
     status: 'confirmada',
-    has_tax: false,
+    has_tax: true,
   });
   const [items, setItems] = useState<ItemRow[]>([]);
   const [payments, setPayments] = useState<PaymentSplit>(emptyPayments);
@@ -338,7 +263,7 @@ export default function Purchases() {
       purchase_date: toDateInputValue(new Date()),
       notes: '',
       status: 'confirmada',
-      has_tax: false,
+      has_tax: true,
     });
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_cost: '0' }]);
     setPayments({ efectivo: '0', banco: '0', por_pagar: String(totals.total || 0) });
@@ -454,24 +379,6 @@ export default function Purchases() {
         setSaving(false);
         return;
       }
-      // Log inventory: purchase edit
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const qty = Number(it.quantity);
-          const before = p ? p.stock : 0;
-          return {
-            product_id:   it.product_id,
-            product_name: p?.name ?? '',
-            product_sku:  p?.sku ?? '',
-            action:       'purchase',
-            stock_before: before,
-            stock_after:  before + qty,
-            changed_by:   currentUser?.name ?? null,
-            notes:        `Compra editada ${form.invoice_number}`,
-          };
-        }),
-      );
       const payRows = buildPayments(editing.id);
       if (payRows.length > 0) {
         const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
@@ -498,24 +405,6 @@ export default function Purchases() {
         setSaving(false);
         return;
       }
-      // Log inventory: new purchase
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const qty = Number(it.quantity);
-          const before = p ? p.stock : 0;
-          return {
-            product_id:   it.product_id,
-            product_name: p?.name ?? '',
-            product_sku:  p?.sku ?? '',
-            action:       'purchase',
-            stock_before: before,
-            stock_after:  before + qty,
-            changed_by:   currentUser?.name ?? null,
-            notes:        `Compra ${form.invoice_number}`,
-          };
-        }),
-      );
       const payRows = buildPayments(created.id);
       if (payRows.length > 0) {
         const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
@@ -970,12 +859,18 @@ export default function Purchases() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="sm:col-span-1">
               <label className="label">Proveedor *</label>
-              <Combobox
-                options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+              <select
+                className="input"
                 value={form.supplier_id}
-                onChange={(val) => setForm({ ...form, supplier_id: val })}
-                placeholder="Buscar proveedor…"
-              />
+                onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
+              >
+                <option value="">Selecciona…</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="label">Folio / Factura</label>
@@ -1016,16 +911,18 @@ export default function Purchases() {
                     <div className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="label">Producto</label>
-                        <Combobox
-                          options={products.map((p) => ({
-                            value: p.id,
-                            label: p.name,
-                            sub: p.sku,
-                          }))}
+                        <select
+                          className="input"
                           value={it.product_id}
-                          onChange={(val) => onProductChange(it.id, val)}
-                          placeholder="Buscar producto…"
-                        />
+                          onChange={(e) => onProductChange(it.id, e.target.value)}
+                        >
+                          <option value="">Selecciona producto…</option>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.sku})
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div className="col-span-5 sm:col-span-2">
                         <label className="label">Cantidad</label>
@@ -1334,31 +1231,24 @@ export default function Purchases() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Proveedor *</label>
-              <Combobox
-                options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+              <select
+                className="input"
                 value={supPayForm.supplier_id}
-                onChange={(val) => setSupPayForm({ ...supPayForm, supplier_id: val, purchase_id: '' })}
-                placeholder="Buscar proveedor…"
-              />
+                onChange={(e) => setSupPayForm({ ...supPayForm, supplier_id: e.target.value, purchase_id: '' })}
+              >
+                <option value="">Selecciona…</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="label">Compra asociada</label>
-              <Combobox
-                options={[
-                  { value: '', label: 'Sin compra específica' },
-                  ...(purchases ?? [])
-                    .filter((p) => !supPayForm.supplier_id || p.supplier_id === supPayForm.supplier_id)
-                    .map((p) => {
-                      const bal = Math.max(0, p.total - (paidByPurchase.get(p.id) ?? 0));
-                      return {
-                        value: p.id,
-                        label: p.invoice_number ?? 'Sin folio',
-                        sub: `${formatCurrency(p.total)}${bal > 0.005 ? ` · saldo ${formatCurrency(bal)}` : ' ✓'}`,
-                      };
-                    }),
-                ]}
+              <select
+                className="input"
                 value={supPayForm.purchase_id}
-                onChange={(purchaseId) => {
+                onChange={(e) => {
+                  const purchaseId = e.target.value;
                   const purchase = (purchases ?? []).find((p) => p.id === purchaseId);
                   if (purchase) {
                     const balance = purchase.total - (paidByPurchase.get(purchase.id) ?? 0);
@@ -1371,8 +1261,20 @@ export default function Purchases() {
                     setSupPayForm({ ...supPayForm, purchase_id: purchaseId });
                   }
                 }}
-                placeholder="Buscar compra…"
-              />
+              >
+                <option value="">Sin compra específica</option>
+                {(purchases ?? [])
+                  .filter((p) => !supPayForm.supplier_id || p.supplier_id === supPayForm.supplier_id)
+                  .map((p) => {
+                    const bal = Math.max(0, p.total - (paidByPurchase.get(p.id) ?? 0));
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.invoice_number ?? 'Sin folio'} · {formatCurrency(p.total)}
+                        {bal > 0.005 ? ` (saldo: ${formatCurrency(bal)})` : ' ✓'}
+                      </option>
+                    );
+                  })}
+              </select>
             </div>
           </div>
 

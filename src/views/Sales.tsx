@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp,
   Plus,
@@ -32,82 +32,6 @@ type ItemRow = {
   unit_price: string;
 };
 
-// --------------- Combobox ---------------
-type ComboboxOption = { value: string; label: string; sub?: string; disabled?: boolean };
-
-function Combobox({
-  options,
-  value,
-  onChange,
-  placeholder = 'Buscar…',
-}: {
-  options: ComboboxOption[];
-  value: string;
-  onChange: (val: string) => void;
-  placeholder?: string;
-}) {
-  const selected = options.find((o) => o.value === value);
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  // cierra el dropdown al hacer click fuera
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const filtered = query.trim()
-    ? options.filter(
-        (o) =>
-          o.label.toLowerCase().includes(query.toLowerCase()) ||
-          (o.sub ?? '').toLowerCase().includes(query.toLowerCase()),
-      )
-    : options;
-
-  const handleSelect = (o: ComboboxOption) => {
-    if (o.disabled) return;
-    onChange(o.value);
-    setQuery('');
-    setOpen(false);
-  };
-
-  return (
-    <div ref={ref} className="relative">
-      <input
-        className="input w-full"
-        value={open ? query : (selected?.label ?? '')}
-        placeholder={placeholder}
-        onFocus={() => { setQuery(''); setOpen(true); }}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-      />
-      {open && (
-        <ul className="absolute z-50 mt-1 w-full rounded-lg border border-ink-200 bg-white shadow-lg max-h-52 overflow-y-auto text-sm">
-          {filtered.length === 0 && (
-            <li className="px-3 py-2 text-ink-400">Sin resultados</li>
-          )}
-          {filtered.map((o) => (
-            <li
-              key={o.value}
-              onMouseDown={() => handleSelect(o)}
-              className={`px-3 py-2 cursor-pointer flex justify-between items-center gap-2
-                ${o.disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-brand-50 hover:text-brand-700'}
-                ${o.value === value ? 'bg-brand-50 font-semibold' : ''}`}
-            >
-              <span>{o.label}</span>
-              {o.sub && <span className="text-xs text-ink-400 shrink-0">{o.sub}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-// ----------------------------------------
-
 const TAX_RATE = 0.16;
 
 const generateInvoiceNumber = (existing: SaleRow[]): string => {
@@ -135,7 +59,7 @@ function getWeekRange(): { monday: Date; sunday: Date } {
 }
 
 export default function Sales() {
-  const { can, currentUser } = useAuth();
+  const { can } = useAuth();
   const canCreate = can('sales:create');
   const canEdit   = can('sales:edit');
   const canDelete = can('sales:delete');
@@ -157,7 +81,7 @@ export default function Sales() {
     sale_date: toDateInputValue(new Date()),
     notes: '',
     status: 'confirmada',
-    has_tax: false,
+    has_tax: true,
   });
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -166,12 +90,7 @@ export default function Sales() {
   const load = async () => {
     setLoading(true);
     const [sRes, cRes, prodRes] = await Promise.all([
-      supabase
-        .from('sales')
-        .select('*, customer:customers(*)')
-        // Exclude sales that have already moved to Collections (delivery confirmed)
-        .neq('delivery_status', 'entregado')
-        .order('sale_date', { ascending: false }),
+      supabase.from('sales').select('*, customer:customers(*)').order('sale_date', { ascending: false }),
       supabase.from('customers').select('*').order('name'),
       supabase.from('products').select('*').order('name'),
     ]);
@@ -225,7 +144,7 @@ export default function Sales() {
       sale_date: toDateInputValue(new Date()),
       notes: '',
       status: 'confirmada',
-      has_tax: false,
+      has_tax: true,
     });
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
     setModalOpen(true);
@@ -316,24 +235,6 @@ export default function Sales() {
         setSaving(false);
         return;
       }
-      // Log inventory: sale edit
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const qty = Number(it.quantity);
-          const before = p ? p.stock : 0;
-          return {
-            product_id:   it.product_id,
-            product_name: p?.name ?? '',
-            product_sku:  p?.sku ?? '',
-            action:       'sale',
-            stock_before: before,
-            stock_after:  before - qty,
-            changed_by:   currentUser?.name ?? null,
-            notes:        `Venta editada ${form.invoice_number}`,
-          };
-        }),
-      );
       push('success', 'Venta actualizada');
       setModalOpen(false);
       load();
@@ -358,24 +259,6 @@ export default function Sales() {
         setSaving(false);
         return;
       }
-      // Log inventory: new sale
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const qty = Number(it.quantity);
-          const before = p ? p.stock : 0;
-          return {
-            product_id:   it.product_id,
-            product_name: p?.name ?? '',
-            product_sku:  p?.sku ?? '',
-            action:       'sale',
-            stock_before: before,
-            stock_after:  before - qty,
-            changed_by:   currentUser?.name ?? null,
-            notes:        `Venta ${form.invoice_number}`,
-          };
-        }),
-      );
       push('success', 'Venta registrada');
       setModalOpen(false);
       setSaving(false);
@@ -576,12 +459,18 @@ export default function Sales() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="label">Cliente *</label>
-              <Combobox
-                options={customers.map((c) => ({ value: c.id, label: c.name }))}
+              <select
+                className="input"
                 value={form.customer_id}
-                onChange={(val) => setForm({ ...form, customer_id: val })}
-                placeholder="Buscar cliente…"
-              />
+                onChange={(e) => setForm({ ...form, customer_id: e.target.value })}
+              >
+                <option value="">Selecciona…</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="label">Folio / Factura</label>
@@ -626,17 +515,18 @@ export default function Sales() {
                     <div className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="label">Producto</label>
-                        <Combobox
-                          options={products.map((p) => ({
-                            value: p.id,
-                            label: p.name,
-                            sub: `${p.sku} · stock ${p.stock}`,
-                            disabled: p.stock <= 0,
-                          }))}
+                        <select
+                          className="input"
                           value={it.product_id}
-                          onChange={(val) => onProductChange(it.id, val)}
-                          placeholder="Buscar producto…"
-                        />
+                          onChange={(e) => onProductChange(it.id, e.target.value)}
+                        >
+                          <option value="">Selecciona producto…</option>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id} disabled={p.stock <= 0}>
+                              {p.name} ({p.sku}) — stock {p.stock}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div className="col-span-5 sm:col-span-2">
                         <label className="label">Cantidad</label>
@@ -831,3 +721,4 @@ export default function Sales() {
     </div>
   );
 }
+
