@@ -81,7 +81,7 @@ export default function Sales() {
     sale_date: toDateInputValue(new Date()),
     notes: '',
     status: 'confirmada',
-    has_tax: true,
+    has_tax: false,
   });
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
