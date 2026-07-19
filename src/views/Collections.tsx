@@ -222,7 +222,8 @@ export default function Collections({ onDataChanged }: Props) {
   }, [tab, pendingDeliveries, deliveredSalesWeek, search]);
 
   const totalCollectedToday = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     return (collections ?? [])
       .filter((c) => c.collection_date.slice(0, 10) === today)
       .reduce((acc, c) => acc + c.amount, 0);
