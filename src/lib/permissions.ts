@@ -36,7 +36,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   vendedor: ['sales:create', 'customers:create'],
   compras: ['purchases:create', 'suppliers:create'],
   cobranza: ['collections:edit'],
-  supervisor: ['collections:edit', 'inventory:create', 'inventory:edit'],
+  supervisor: ['sales:edit', 'collections:edit', 'inventory:create', 'inventory:edit'],
 };
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -52,7 +52,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   vendedor: 'Puede ver todo y crear ventas y clientes',
   compras: 'Puede ver todo y crear compras y proveedores',
   cobranza: 'Puede ver todo y gestionar entregas y cobranza',
-  supervisor: 'Puede ver todo, gestionar cobranza y agregar/editar productos',
+  supervisor: 'Puede ver todo, editar ventas, gestionar cobranza y agregar/editar productos',
 };
 
 export const ROLE_COLORS: Record<Role, string> = {
