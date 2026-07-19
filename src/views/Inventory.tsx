@@ -243,121 +243,141 @@ const ACTION_COLORS: Record<InventoryLog['action'], string> = {
   sale:     'bg-accent-100 text-accent-700',
 };
 
+// Movimiento sintético construido en el frontend sin depender de inventory_logs
+type Movement = {
+  id: string;
+  product_name: string;
+  product_sku: string;
+  action: 'sale' | 'purchase' | 'created' | 'edited' | 'deleted';
+  delta: number | null;
+  changed_by: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
 function InventoryLogTab() {
-  const [logs, setLogs] = useState<InventoryLog[] | null>(null);
+  const [movements, setMovements] = useState<Movement[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
-  const [dateRange, setDateRange] = useState<string>('0');
+  const [dateRange, setDateRange] = useState<string>('7');
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
 
-      // ── Backfill: insert missing logs from this week's sales/purchases ──
-      try {
-        const now = new Date();
-        const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
-        const monday = new Date(now);
-        monday.setDate(now.getDate() + diff);
-        monday.setHours(0, 0, 0, 0);
-        const mondayISO = monday.toISOString();
+      // Compute date window
+      const since = dateRange === '0' ? null : (() => {
+        const d = new Date();
+        d.setDate(d.getDate() - Number(dateRange));
+        d.setHours(0, 0, 0, 0);
+        return d.toISOString();
+      })();
 
-        // Query sales, purchases, their items, existing logs and products in parallel
-        // Filter sales/purchases directly (not via embedded relation — Supabase does not support .gte on join columns)
-        const [
-          { data: sales },
-          { data: purchases },
-          { data: allSaleItems },
-          { data: allPurchaseItems },
-          { data: existingLogs },
-          { data: prods },
-        ] = await Promise.all([
-          supabase.from('sales').select('id, invoice_number, sale_date').gte('sale_date', mondayISO),
-          supabase.from('purchases').select('id, invoice_number, purchase_date').gte('purchase_date', mondayISO),
-          supabase.from('sale_items').select('sale_id, product_id'),
-          supabase.from('purchase_items').select('purchase_id, product_id'),
-          supabase.from('inventory_logs').select('notes'),
-          supabase.from('products').select('id, name, sku'),
-        ]);
+      // ── 1. Ventas + sus líneas ──────────────────────────────────────────
+      let salesQuery = supabase
+        .from('sales')
+        .select('id, invoice_number, sale_date')
+        .order('sale_date', { ascending: false });
+      if (since) salesQuery = salesQuery.gte('sale_date', since);
 
-        const existingNotes = new Set((existingLogs ?? []).map((l: { notes: string | null }) => l.notes ?? ''));
-        const prodMap = new Map(((prods ?? []) as { id: string; name: string; sku: string }[]).map((p) => [p.id, p]));
+      let purchasesQuery = supabase
+        .from('purchases')
+        .select('id, invoice_number, purchase_date')
+        .order('purchase_date', { ascending: false });
+      if (since) purchasesQuery = purchasesQuery.gte('purchase_date', since);
 
-        type SaleRow     = { id: string; invoice_number: string | null; sale_date: string };
-        type PurchaseRow = { id: string; invoice_number: string | null; purchase_date: string };
-        type SaleItemRow     = { sale_id: string; product_id: string };
-        type PurchaseItemRow = { purchase_id: string; product_id: string };
+      const [
+        { data: sales },
+        { data: purchases },
+        { data: saleItems },
+        { data: purchaseItems },
+        { data: prods },
+        { data: invLogs },
+      ] = await Promise.all([
+        salesQuery,
+        purchasesQuery,
+        supabase.from('sale_items').select('sale_id, product_id, quantity'),
+        supabase.from('purchase_items').select('purchase_id, product_id, quantity'),
+        supabase.from('products').select('id, name, sku'),
+        // inventory_logs may not exist — handle error gracefully
+        supabase.from('inventory_logs').select('*').order('created_at', { ascending: false }).limit(200),
+      ]);
 
-        const toInsert: object[] = [];
+      type ProdRow = { id: string; name: string; sku: string };
+      type SaleRow = { id: string; invoice_number: string | null; sale_date: string };
+      type PurchaseRow = { id: string; invoice_number: string | null; purchase_date: string };
+      type SaleItemRow = { sale_id: string; product_id: string; quantity: number };
+      type PurchaseItemRow = { purchase_id: string; product_id: string; quantity: number };
 
-        for (const s of ((sales ?? []) as SaleRow[])) {
-          const folio = s.invoice_number ?? s.id;
-          const noteKey = `Venta ${folio}`;
-          if (existingNotes.has(noteKey)) continue;
-          // one log entry per product in this sale
-          const sItems = ((allSaleItems ?? []) as SaleItemRow[]).filter((si) => si.sale_id === s.id);
-          if (sItems.length === 0) {
-            // sale with no items — log once without product
-            toInsert.push({ product_id: null, product_name: '—', product_sku: '—',
-              action: 'sale', stock_before: 0, stock_after: 0, changed_by: null, notes: noteKey, created_at: s.sale_date });
-          } else {
-            for (const si of sItems) {
-              const prod = prodMap.get(si.product_id);
-              toInsert.push({ product_id: si.product_id, product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? 'N/A',
-                action: 'sale', stock_before: 0, stock_after: 0, changed_by: null, notes: noteKey, created_at: s.sale_date });
-            }
+      const prodMap = new Map(((prods ?? []) as ProdRow[]).map((p) => [p.id, p]));
+      const result: Movement[] = [];
+
+      // Build one row per product-line per sale
+      for (const s of ((sales ?? []) as SaleRow[])) {
+        const folio = s.invoice_number ?? s.id.slice(0, 8);
+        const lines = ((saleItems ?? []) as SaleItemRow[]).filter((si) => si.sale_id === s.id);
+        if (lines.length === 0) {
+          result.push({ id: `sale-${s.id}`, product_name: '—', product_sku: '—',
+            action: 'sale', delta: null, changed_by: null, notes: `Venta ${folio}`, created_at: s.sale_date });
+        } else {
+          for (const li of lines) {
+            const prod = prodMap.get(li.product_id);
+            result.push({ id: `sale-${s.id}-${li.product_id}`,
+              product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? '—',
+              action: 'sale', delta: -li.quantity, changed_by: null,
+              notes: `Venta ${folio}`, created_at: s.sale_date });
           }
-          existingNotes.add(noteKey);
         }
-
-        for (const p of ((purchases ?? []) as PurchaseRow[])) {
-          const folio = p.invoice_number ?? p.id;
-          const noteKey = `Compra ${folio}`;
-          if (existingNotes.has(noteKey)) continue;
-          const pItems = ((allPurchaseItems ?? []) as PurchaseItemRow[]).filter((pi) => pi.purchase_id === p.id);
-          if (pItems.length === 0) {
-            toInsert.push({ product_id: null, product_name: '—', product_sku: '—',
-              action: 'purchase', stock_before: 0, stock_after: 0, changed_by: null, notes: noteKey, created_at: p.purchase_date });
-          } else {
-            for (const pi of pItems) {
-              const prod = prodMap.get(pi.product_id);
-              toInsert.push({ product_id: pi.product_id, product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? 'N/A',
-                action: 'purchase', stock_before: 0, stock_after: 0, changed_by: null, notes: noteKey, created_at: p.purchase_date });
-            }
-          }
-          existingNotes.add(noteKey);
-        }
-
-        if (toInsert.length > 0) await supabase.from('inventory_logs').insert(toInsert);
-      } catch { /* backfill failure does not block the tab */ }
-      // ── End backfill ─────────────────────────────────────────────────────
-
-      let query = supabase.from('inventory_logs').select('*').order('created_at', { ascending: false }).limit(500);
-      if (dateRange !== '0') {
-        const since = new Date();
-        since.setDate(since.getDate() - Number(dateRange));
-        since.setHours(0, 0, 0, 0);
-        query = query.gte('created_at', since.toISOString());
       }
-      const { data } = await query;
-      setLogs((data ?? []) as InventoryLog[]);
+
+      // Build one row per product-line per purchase
+      for (const p of ((purchases ?? []) as PurchaseRow[])) {
+        const folio = p.invoice_number ?? p.id.slice(0, 8);
+        const lines = ((purchaseItems ?? []) as PurchaseItemRow[]).filter((pi) => pi.purchase_id === p.id);
+        if (lines.length === 0) {
+          result.push({ id: `pur-${p.id}`, product_name: '—', product_sku: '—',
+            action: 'purchase', delta: null, changed_by: null, notes: `Compra ${folio}`, created_at: p.purchase_date });
+        } else {
+          for (const li of lines) {
+            const prod = prodMap.get(li.product_id);
+            result.push({ id: `pur-${p.id}-${li.product_id}`,
+              product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? '—',
+              action: 'purchase', delta: li.quantity, changed_by: null,
+              notes: `Compra ${folio}`, created_at: p.purchase_date });
+          }
+        }
+      }
+
+      // Append inventory_logs rows (manual adjustments, created, edited, deleted) if available
+      for (const l of ((invLogs ?? []) as InventoryLog[])) {
+        if (l.action === 'sale' || l.action === 'purchase') continue; // already in result
+        result.push({ id: l.id, product_name: l.product_name, product_sku: l.product_sku,
+          action: l.action, delta: l.delta ?? null, changed_by: l.changed_by,
+          notes: l.notes, created_at: l.created_at });
+      }
+
+      // Sort all by date desc
+      result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setMovements(result);
       setLoading(false);
     };
     load();
   }, [dateRange]);
 
   const filtered = useMemo(() => {
-    if (!logs) return [];
-    return logs.filter((l) => {
-      const matchesAction = actionFilter === 'all' || l.action === actionFilter;
+    if (!movements) return [];
+    return movements.filter((m) => {
+      const matchesAction = actionFilter === 'all' || m.action === actionFilter;
       const matchesSearch =
         !search ||
-        l.product_name.toLowerCase().includes(search.toLowerCase()) ||
-        l.product_sku.toLowerCase().includes(search.toLowerCase());
+        m.product_name.toLowerCase().includes(search.toLowerCase()) ||
+        m.product_sku.toLowerCase().includes(search.toLowerCase()) ||
+        (m.notes ?? '').toLowerCase().includes(search.toLowerCase());
       return matchesAction && matchesSearch;
     });
-  }, [logs, actionFilter, search]);
+  }, [movements, actionFilter, search]);
 
   if (loading) return <FullPageLoader />;
 
@@ -370,7 +390,7 @@ function InventoryLogTab() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
             <input
               className="input pl-9"
-              placeholder="Buscar por producto o SKU…"
+              placeholder="Buscar por producto, SKU o folio…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -392,10 +412,10 @@ function InventoryLogTab() {
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
           >
-            <option value="0">Todo el historial</option>
+            <option value="7">Esta semana</option>
             <option value="3">Últimos 3 días</option>
-            <option value="7">Últimos 7 días</option>
             <option value="30">Últimos 30 días</option>
+            <option value="0">Todo el historial</option>
           </select>
         </div>
       </div>
@@ -406,7 +426,7 @@ function InventoryLogTab() {
           <EmptyState
             icon={ClipboardList}
             title="Sin movimientos"
-            description="Los cambios en el inventario aparecerán aquí."
+            description="No hay movimientos en el periodo seleccionado."
           />
         ) : (
           <div className="overflow-x-auto">
@@ -416,49 +436,38 @@ function InventoryLogTab() {
                   <th className="table-head">Fecha</th>
                   <th className="table-head">Producto</th>
                   <th className="table-head">Acción</th>
-                  <th className="table-head text-right">Stock anterior</th>
-                  <th className="table-head text-right">Stock nuevo</th>
                   <th className="table-head text-right">Cambio</th>
                   <th className="table-head">Usuario</th>
-                  <th className="table-head">Notas</th>
+                  <th className="table-head">Folio / Notas</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {filtered.map((l) => {
-                  const delta = l.delta ?? 0;
-                  return (
-                    <tr key={l.id} className="hover:bg-ink-50/60 transition">
-                      <td className="table-cell text-xs text-ink-500 whitespace-nowrap">
-                        {formatDateTime(l.created_at)}
-                      </td>
-                      <td className="table-cell">
-                        <div className="font-semibold text-ink-900">{l.product_name}</div>
-                        <div className="text-xs text-ink-500">SKU {l.product_sku}</div>
-                      </td>
-                      <td className="table-cell">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${ACTION_COLORS[l.action]}`}>
-                          {ACTION_LABELS[l.action]}
+                {filtered.map((m) => (
+                  <tr key={m.id} className="hover:bg-ink-50/60 transition">
+                    <td className="table-cell text-xs text-ink-500 whitespace-nowrap">
+                      {formatDateTime(m.created_at)}
+                    </td>
+                    <td className="table-cell">
+                      <div className="font-semibold text-ink-900">{m.product_name}</div>
+                      {m.product_sku !== '—' && <div className="text-xs text-ink-500">SKU {m.product_sku}</div>}
+                    </td>
+                    <td className="table-cell">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${ACTION_COLORS[m.action]}`}>
+                        {ACTION_LABELS[m.action]}
+                      </span>
+                    </td>
+                    <td className="table-cell text-right font-semibold">
+                      {m.delta != null ? (
+                        <span className={`flex items-center justify-end gap-0.5 ${m.delta > 0 ? 'text-success-600' : m.delta < 0 ? 'text-danger-600' : 'text-ink-400'}`}>
+                          {m.delta > 0 ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+                          {m.delta > 0 ? '+' : ''}{formatNumber(m.delta, 3)}
                         </span>
-                      </td>
-                      <td className="table-cell text-right text-ink-700">
-                        {l.stock_before != null ? formatNumber(l.stock_before, 3) : '—'}
-                      </td>
-                      <td className="table-cell text-right text-ink-700">
-                        {l.stock_after != null ? formatNumber(l.stock_after, 3) : '—'}
-                      </td>
-                      <td className="table-cell text-right font-semibold">
-                        {l.stock_before != null && l.stock_after != null ? (
-                          <span className={`flex items-center justify-end gap-0.5 ${delta > 0 ? 'text-success-600' : delta < 0 ? 'text-danger-600' : 'text-ink-400'}`}>
-                            {delta > 0 ? <ArrowUp size={13} /> : delta < 0 ? <ArrowDown size={13} /> : null}
-                            {delta > 0 ? '+' : ''}{formatNumber(delta, 3)}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="table-cell text-ink-600 text-sm">{l.changed_by ?? '—'}</td>
-                      <td className="table-cell text-ink-500 text-xs">{l.notes ?? '—'}</td>
-                    </tr>
-                  );
-                })}
+                      ) : '—'}
+                    </td>
+                    <td className="table-cell text-ink-600 text-sm">{m.changed_by ?? '—'}</td>
+                    <td className="table-cell text-ink-500 text-xs">{m.notes ?? '—'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
