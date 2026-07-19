@@ -243,25 +243,40 @@ const ACTION_COLORS: Record<InventoryLog['action'], string> = {
   sale:     'bg-accent-100 text-accent-700',
 };
 
+const DATE_RANGE_OPTIONS = [
+  { value: '3',  label: 'Últimos 3 días' },
+  { value: '7',  label: 'Últimos 7 días' },
+  { value: '30', label: 'Últimos 30 días' },
+  { value: '0',  label: 'Todo el historial' },
+];
+
 function InventoryLogTab() {
   const [logs, setLogs] = useState<InventoryLog[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [dateRange, setDateRange] = useState<string>('3');
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase
+      let query = supabase
         .from('inventory_logs')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(500);
+      if (dateRange !== '0') {
+        const since = new Date();
+        since.setDate(since.getDate() - Number(dateRange));
+        since.setHours(0, 0, 0, 0);
+        query = query.gte('created_at', since.toISOString());
+      }
+      const { data } = await query;
       setLogs((data ?? []) as InventoryLog[]);
       setLoading(false);
     };
     load();
-  }, []);
+  }, [dateRange]);
 
   const filtered = useMemo(() => {
     if (!logs) return [];
@@ -302,6 +317,15 @@ function InventoryLogTab() {
             <option value="deleted">Eliminado</option>
             <option value="purchase">Compra</option>
             <option value="sale">Venta</option>
+          </select>
+          <select
+            className="input w-auto"
+            value={dateRange}
+            onChange={(e) => setDateRange(e.target.value)}
+          >
+            {DATE_RANGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
         </div>
       </div>
