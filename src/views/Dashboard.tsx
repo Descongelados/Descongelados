@@ -135,17 +135,16 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         return;
       }
 
-      const sum = (rows: Array<{ total?: number; amount?: number }>) =>
-        rows.reduce((acc, r) => acc + (r.total ?? r.amount ?? 0), 0);
-
-      const totalSales = sum((salesRes.data ?? []) as Array<{ total: number }>);
-      const totalPurchases = sum((purchasesRes.data ?? []) as Array<{ total: number }>);
+      const totalPurchases = ((purchasesRes.data ?? []) as Array<{ total: number }>)
+        .reduce((acc, r) => acc + r.total, 0);
 
       type PayRow = { amount: number; payment_method: string };
       const collections = (collectionsRes.data ?? []) as PayRow[];
       const supplierPayments = (supplierPaymentsRes.data ?? []) as PayRow[];
 
+      // Ventas totales = lo efectivamente cobrado esta semana (efectivo + banco + por_pagar)
       const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
+      const totalSales = totalCollected;
       const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
 
       // Calcular Por cobrar real: suma de saldos pendientes por venta de esta semana
