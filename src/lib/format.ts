@@ -16,9 +16,17 @@ export const formatNumber = (value: number, decimals = 2): string => {
   }).format(n);
 };
 
+// Parse a date string safely: plain YYYY-MM-DD is anchored to noon local time
+// to avoid UTC midnight rolling back one day in negative-offset timezones (e.g. CDT UTC-6).
+function parseDateSafe(value: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(value + 'T12:00:00')
+    : new Date(value);
+}
+
 export const formatDate = (value: string | Date | null): string => {
   if (!value) return '—';
-  const d = typeof value === 'string' ? new Date(value) : value;
+  const d = typeof value === 'string' ? parseDateSafe(value) : value;
   if (Number.isNaN(d.getTime())) return '—';
   return new Intl.DateTimeFormat('es-MX', {
     day: '2-digit',
@@ -29,7 +37,7 @@ export const formatDate = (value: string | Date | null): string => {
 
 export const formatDateTime = (value: string | Date | null): string => {
   if (!value) return '—';
-  const d = typeof value === 'string' ? new Date(value) : value;
+  const d = typeof value === 'string' ? parseDateSafe(value) : value;
   if (Number.isNaN(d.getTime())) return '—';
   return new Intl.DateTimeFormat('es-MX', {
     day: '2-digit',
