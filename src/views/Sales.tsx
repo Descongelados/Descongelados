@@ -59,7 +59,7 @@ function getWeekRange(): { monday: Date; sunday: Date } {
 }
 
 export default function Sales() {
-  const { can } = useAuth();
+  const { can, currentUser } = useAuth();
   const canCreate = can('sales:create');
   const canEdit   = can('sales:edit');
   const canDelete = can('sales:delete');
@@ -235,6 +235,17 @@ export default function Sales() {
         setSaving(false);
         return;
       }
+      await supabase.from('inventory_logs').insert(
+        validItems.map((it) => {
+          const p = products.find((pr) => pr.id === it.product_id);
+          const before = p ? p.stock : 0;
+          return {
+            product_id: it.product_id, product_name: p?.name ?? '', product_sku: p?.sku ?? '',
+            action: 'sale', stock_before: before, stock_after: before - Number(it.quantity),
+            changed_by: currentUser?.name ?? null, notes: `Venta editada ${form.invoice_number}`,
+          };
+        }),
+      );
       push('success', 'Venta actualizada');
       setModalOpen(false);
       load();
@@ -259,6 +270,17 @@ export default function Sales() {
         setSaving(false);
         return;
       }
+      await supabase.from('inventory_logs').insert(
+        validItems.map((it) => {
+          const p = products.find((pr) => pr.id === it.product_id);
+          const before = p ? p.stock : 0;
+          return {
+            product_id: it.product_id, product_name: p?.name ?? '', product_sku: p?.sku ?? '',
+            action: 'sale', stock_before: before, stock_after: before - Number(it.quantity),
+            changed_by: currentUser?.name ?? null, notes: `Venta ${form.invoice_number}`,
+          };
+        }),
+      );
       push('success', 'Venta registrada');
       setModalOpen(false);
       setSaving(false);

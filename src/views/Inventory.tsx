@@ -248,20 +248,81 @@ function InventoryLogTab() {
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [dateRange, setDateRange] = useState<string>('0');
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase
-        .from('inventory_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500);
+
+      // ── Backfill: insert missing logs from this week's sales/purchases ──
+      try {
+        const now = new Date();
+        const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() + diff);
+        monday.setHours(0, 0, 0, 0);
+
+        const [{ data: saleItems }, { data: purchaseItems }, { data: existingLogs }, { data: prods }] =
+          await Promise.all([
+            supabase.from('sale_items')
+              .select('product_id, quantity, sale:sales!inner(id, invoice_number, sale_date)')
+              .gte('sale.sale_date', monday.toISOString()),
+            supabase.from('purchase_items')
+              .select('product_id, quantity, purchase:purchases!inner(id, invoice_number, purchase_date)')
+              .gte('purchase.purchase_date', monday.toISOString()),
+            supabase.from('inventory_logs').select('notes').gte('created_at', monday.toISOString()),
+            supabase.from('products').select('id, name, sku'),
+          ]);
+
+        const existingNotes = new Set((existingLogs ?? []).map((l: { notes: string | null }) => l.notes ?? ''));
+        const prodMap = new Map(((prods ?? []) as { id: string; name: string; sku: string }[]).map((p) => [p.id, p]));
+
+        type SaleItemRaw     = { product_id: string; sale:     ({ id: string; invoice_number: string | null; sale_date:     string } | { id: string; invoice_number: string | null; sale_date:     string }[]) };
+        type PurchaseItemRaw = { product_id: string; purchase: ({ id: string; invoice_number: string | null; purchase_date: string } | { id: string; invoice_number: string | null; purchase_date: string }[]) };
+
+        const toInsert: object[] = [];
+
+        for (const si of ((saleItems ?? []) as unknown as SaleItemRaw[])) {
+          const sale = Array.isArray(si.sale) ? si.sale[0] : si.sale;
+          if (!sale) continue;
+          const folio = sale.invoice_number ?? sale.id;
+          const noteKey = `Venta ${folio}`;
+          if (existingNotes.has(noteKey)) continue;
+          const prod = prodMap.get(si.product_id);
+          toInsert.push({ product_id: si.product_id, product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? 'N/A',
+            action: 'sale', stock_before: 0, stock_after: 0, changed_by: null, notes: noteKey, created_at: sale.sale_date });
+          existingNotes.add(noteKey);
+        }
+
+        for (const pi of ((purchaseItems ?? []) as unknown as PurchaseItemRaw[])) {
+          const purchase = Array.isArray(pi.purchase) ? pi.purchase[0] : pi.purchase;
+          if (!purchase) continue;
+          const folio = purchase.invoice_number ?? purchase.id;
+          const noteKey = `Compra ${folio}`;
+          if (existingNotes.has(noteKey)) continue;
+          const prod = prodMap.get(pi.product_id);
+          toInsert.push({ product_id: pi.product_id, product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? 'N/A',
+            action: 'purchase', stock_before: 0, stock_after: 0, changed_by: null, notes: noteKey, created_at: purchase.purchase_date });
+          existingNotes.add(noteKey);
+        }
+
+        if (toInsert.length > 0) await supabase.from('inventory_logs').insert(toInsert);
+      } catch { /* backfill failure does not block the tab */ }
+      // ── End backfill ─────────────────────────────────────────────────────
+
+      let query = supabase.from('inventory_logs').select('*').order('created_at', { ascending: false }).limit(500);
+      if (dateRange !== '0') {
+        const since = new Date();
+        since.setDate(since.getDate() - Number(dateRange));
+        since.setHours(0, 0, 0, 0);
+        query = query.gte('created_at', since.toISOString());
+      }
+      const { data } = await query;
       setLogs((data ?? []) as InventoryLog[]);
       setLoading(false);
     };
     load();
-  }, []);
+  }, [dateRange]);
 
   const filtered = useMemo(() => {
     if (!logs) return [];
@@ -302,6 +363,16 @@ function InventoryLogTab() {
             <option value="deleted">Eliminado</option>
             <option value="purchase">Compra</option>
             <option value="sale">Venta</option>
+          </select>
+          <select
+            className="input w-auto"
+            value={dateRange}
+            onChange={(e) => setDateRange(e.target.value)}
+          >
+            <option value="0">Todo el historial</option>
+            <option value="3">Últimos 3 días</option>
+            <option value="7">Últimos 7 días</option>
+            <option value="30">Últimos 30 días</option>
           </select>
         </div>
       </div>
