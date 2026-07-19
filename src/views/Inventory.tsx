@@ -260,32 +260,34 @@ function InventoryLogTab() {
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
-  const [dateRange, setDateRange] = useState<string>('7');
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
 
-      // Compute date window
-      const since = dateRange === '0' ? null : (() => {
-        const d = new Date();
-        d.setDate(d.getDate() - Number(dateRange));
-        d.setHours(0, 0, 0, 0);
-        return d.toISOString();
-      })();
+      // Siempre últimos 7 días
+      const since = new Date();
+      since.setDate(since.getDate() - 7);
+      since.setHours(0, 0, 0, 0);
+      const sinceISO = since.toISOString();
 
-      // ── 1. Ventas + sus líneas ──────────────────────────────────────────
-      let salesQuery = supabase
+      // Limpiar inventory_logs de más de 30 días (silencioso, no bloquea)
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      supabase.from('inventory_logs').delete().lt('created_at', cutoff.toISOString()).then(() => {});
+
+      // ── Ventas + sus líneas ─────────────────────────────────────────────
+      const salesQuery = supabase
         .from('sales')
         .select('id, invoice_number, sale_date')
+        .gte('sale_date', sinceISO)
         .order('sale_date', { ascending: false });
-      if (since) salesQuery = salesQuery.gte('sale_date', since);
 
-      let purchasesQuery = supabase
+      const purchasesQuery = supabase
         .from('purchases')
         .select('id, invoice_number, purchase_date')
+        .gte('purchase_date', sinceISO)
         .order('purchase_date', { ascending: false });
-      if (since) purchasesQuery = purchasesQuery.gte('purchase_date', since);
 
       const [
         { data: sales },
@@ -364,7 +366,7 @@ function InventoryLogTab() {
       setLoading(false);
     };
     load();
-  }, [dateRange]);
+  }, []);
 
   const filtered = useMemo(() => {
     if (!movements) return [];
@@ -407,16 +409,7 @@ function InventoryLogTab() {
             <option value="purchase">Compra</option>
             <option value="sale">Venta</option>
           </select>
-          <select
-            className="input w-auto"
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value)}
-          >
-            <option value="7">Esta semana</option>
-            <option value="3">Últimos 3 días</option>
-            <option value="30">Últimos 30 días</option>
-            <option value="0">Todo el historial</option>
-          </select>
+          <span className="text-xs text-ink-400 whitespace-nowrap">Últimos 7 días</span>
         </div>
       </div>
 
