@@ -195,7 +195,7 @@ export default function Purchases() {
     purchase_date: toDateInputValue(new Date()),
     notes: '',
     status: 'confirmada',
-    has_tax: true,
+    has_tax: false,
   });
   const [items, setItems] = useState<ItemRow[]>([]);
   const [payments, setPayments] = useState<PaymentSplit>(emptyPayments);
@@ -338,7 +338,7 @@ export default function Purchases() {
       purchase_date: toDateInputValue(new Date()),
       notes: '',
       status: 'confirmada',
-      has_tax: true,
+      has_tax: false,
     });
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_cost: '0' }]);
     setPayments({ efectivo: '0', banco: '0', por_pagar: String(totals.total || 0) });
