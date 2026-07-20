@@ -14,6 +14,8 @@ import {
   Building,
   CheckCircle2,
   TrendingUp,
+  FileText,
+  Layers,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Product, Purchase, PurchaseItem, Supplier, SupplierPayment } from '../lib/types';
@@ -35,6 +37,56 @@ type ItemRow = {
   unit_cost: string;
 };
 type PaymentRow = SupplierPayment & { supplier: Supplier | null; purchase: Purchase | null };
+
+type BusinessExpense = {
+  id: string;
+  description: string;
+  category: string;
+  amount: number;
+  payment_method: string;
+  expense_date: string;
+  reference: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+const EXPENSE_CATEGORIES = [
+  'Renta / Local',
+  'Servicios (luz, agua, gas)',
+  'Gasolina / Transporte',
+  'Salarios / Nomina',
+  'Mantenimiento',
+  'Publicidad / Marketing',
+  'Equipo / Herramientas',
+  'Limpieza / Suministros',
+  'Impuestos / Tramites',
+  'Otro',
+];
+
+type ExpenseForm = {
+  description: string;
+  category: string;
+  amount: string;
+  method: string;
+  efectivo: string;
+  banco: string;
+  expense_date: string;
+  reference: string;
+  notes: string;
+};
+
+const emptyExpenseForm = (): ExpenseForm => ({
+  description: '',
+  category: 'Otro',
+  amount: '',
+  method: 'efectivo',
+  efectivo: '',
+  banco: '',
+  expense_date: toDateInputValue(new Date()),
+  reference: '',
+  notes: '',
+});
 
 const TAX_RATE = 0.16;
 
@@ -85,13 +137,13 @@ function getWeekRange(): { monday: Date; sunday: Date } {
 }
 
 export default function Purchases() {
-  const { can } = useAuth();
+  const { can, currentUser } = useAuth();
   const canCreate = can('purchases:create');
   const canEdit   = can('purchases:edit');
   const canDelete = can('purchases:delete');
 
   const { push } = useToast();
-  const [tab, setTab] = useState<'compras' | 'pagos'>('compras');
+  const [tab, setTab] = useState<'compras' | 'pagos' | 'gastos'>('compras');
 
   const [purchases, setPurchases] = useState<PurchaseRow[] | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -100,6 +152,14 @@ export default function Purchases() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState('all');
+
+  // Gastos extras
+  const [expenses, setExpenses] = useState<BusinessExpense[]>([]);
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<BusinessExpense | null>(null);
+  const [deleteExpense, setDeleteExpense] = useState<BusinessExpense | null>(null);
+  const [expenseForm, setExpenseForm] = useState<ExpenseForm>(emptyExpenseForm());
+  const [savingExpense, setSavingExpense] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState<PurchaseRow | null>(null);
@@ -129,7 +189,7 @@ export default function Purchases() {
 
   const load = async () => {
     setLoading(true);
-    const [pRes, sRes, prodRes, paysRes, supPaysRes] = await Promise.all([
+    const [pRes, sRes, prodRes, paysRes, supPaysRes, expRes] = await Promise.all([
       supabase.from('purchases').select('*, supplier:suppliers(*)').order('purchase_date', { ascending: false }),
       supabase.from('suppliers').select('*').order('name'),
       supabase.from('products').select('*').order('name'),
@@ -138,6 +198,7 @@ export default function Purchases() {
         .from('supplier_payments')
         .select('*, supplier:suppliers(*), purchase:purchases(*)')
         .order('payment_date', { ascending: false }),
+      supabase.from('business_expenses').select('*').order('expense_date', { ascending: false }),
     ]);
     if (pRes.error) {
       push('error', 'No se pudieron cargar las compras');
@@ -149,6 +210,7 @@ export default function Purchases() {
     if (!prodRes.error) setProducts(prodRes.data as Product[]);
     setPaymentByPurchase((paysRes.data ?? []) as Array<{ purchase_id: string; amount: number; payment_method: string }>);
     if (!supPaysRes.error) setSupPayments(supPaysRes.data as PaymentRow[]);
+    if (!expRes.error) setExpenses((expRes.data ?? []) as BusinessExpense[]);
     setLoading(false);
   };
 
@@ -186,6 +248,16 @@ export default function Purchases() {
     });
   }, [supPayments, search, methodFilter, weekStart, weekEnd]);
 
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((e) => {
+      const d = new Date(e.expense_date + 'T12:00:00');
+      const matchesSearch = !search ||
+        e.description.toLowerCase().includes(search.toLowerCase()) ||
+        e.category.toLowerCase().includes(search.toLowerCase());
+      return d >= weekStart && d <= weekEnd && matchesSearch;
+    });
+  }, [expenses, weekStart, weekEnd, search]);
+
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
     const tax = form.has_tax ? subtotal * TAX_RATE : 0;
@@ -200,6 +272,15 @@ export default function Purchases() {
   const paymentTotal = paidNow + porPagar;
   const paymentDiff = totals.total - paymentTotal;
   const paymentBalanced = Math.abs(paymentDiff) < 0.01;
+
+  const totalExpensesThisWeek = useMemo(
+    () => filteredExpenses.reduce((acc, e) => acc + e.amount, 0),
+    [filteredExpenses],
+  );
+
+  const expenseCombinedTotal = useMemo(() => {
+    return (Number(expenseForm.efectivo) || 0) + (Number(expenseForm.banco) || 0);
+  }, [expenseForm.efectivo, expenseForm.banco]);
 
   const getPaymentLabel = (purchaseId: string, purchaseTotal: number) => {
     const pays = paymentByPurchase.filter((p) => p.purchase_id === purchaseId);
@@ -241,7 +322,7 @@ export default function Purchases() {
 
   const totalPaidThisWeek = useMemo(() => {
     const now = new Date();
-    const day = now.getDay(); // 0=Sun … 6=Sat
+    const day = now.getDay();
     const diffToMonday = (day === 0 ? -6 : 1 - day);
     const monday = new Date(now);
     monday.setDate(now.getDate() + diffToMonday);
@@ -382,7 +463,7 @@ export default function Purchases() {
       const payRows = buildPayments(editing.id);
       if (payRows.length > 0) {
         const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
-        if (payErr) push('error', 'No se guardaron los pagos, pero la compra sí se actualizó');
+        if (payErr) push('error', 'No se guardaron los pagos, pero la compra si se actualizo');
       }
       push('success', 'Compra actualizada');
     } else {
@@ -408,7 +489,7 @@ export default function Purchases() {
       const payRows = buildPayments(created.id);
       if (payRows.length > 0) {
         const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
-        if (payErr) push('error', 'No se guardaron los pagos, pero la compra sí se registró');
+        if (payErr) push('error', 'No se guardaron los pagos, pero la compra si se registro');
       }
       push('success', 'Compra registrada');
     }
@@ -519,6 +600,83 @@ export default function Purchases() {
     setDeleteSupPay(null);
   };
 
+  // ── Gastos extras ─────────────────────────────────────────────────────────
+  const openCreateExpense = () => {
+    setEditingExpense(null);
+    setExpenseForm(emptyExpenseForm());
+    setExpenseOpen(true);
+  };
+
+  const openEditExpense = (exp: BusinessExpense) => {
+    setEditingExpense(exp);
+    setExpenseForm({
+      description: exp.description,
+      category: exp.category,
+      amount: String(exp.amount),
+      method: exp.payment_method,
+      efectivo: exp.payment_method === 'efectivo' ? String(exp.amount) : '0',
+      banco: exp.payment_method === 'banco' ? String(exp.amount) : '0',
+      expense_date: exp.expense_date,
+      reference: exp.reference ?? '',
+      notes: exp.notes ?? '',
+    });
+    setExpenseOpen(true);
+  };
+
+  const saveExpense = async () => {
+    if (!expenseForm.description.trim()) {
+      push('error', 'Escribe una descripcion del gasto');
+      return;
+    }
+    const rows: Array<{ description: string; category: string; amount: number; payment_method: string; expense_date: string; reference: string | null; notes: string | null; created_by: string | null }> = [];
+    const base = {
+      description: expenseForm.description.trim(),
+      category: expenseForm.category,
+      expense_date: expenseForm.expense_date,
+      reference: expenseForm.reference.trim() || null,
+      notes: expenseForm.notes.trim() || null,
+      created_by: currentUser?.name ?? null,
+    };
+
+    if (expenseForm.method === 'combinado') {
+      const e = Number(expenseForm.efectivo) || 0;
+      const b = Number(expenseForm.banco) || 0;
+      if (e <= 0 && b <= 0) { push('error', 'Ingresa al menos un monto'); return; }
+      if (e > 0) rows.push({ ...base, amount: e, payment_method: 'efectivo' });
+      if (b > 0) rows.push({ ...base, amount: b, payment_method: 'banco' });
+    } else {
+      const amount = Number(expenseForm.amount);
+      if (!amount || amount <= 0) { push('error', 'El monto debe ser mayor a cero'); return; }
+      rows.push({ ...base, amount, payment_method: expenseForm.method });
+    }
+
+    setSavingExpense(true);
+    if (editingExpense) {
+      const { error } = await supabase.from('business_expenses').update({
+        ...base,
+        amount: rows[0].amount,
+        payment_method: rows[0].payment_method,
+      }).eq('id', editingExpense.id);
+      if (error) { push('error', 'No se pudo actualizar el gasto'); setSavingExpense(false); return; }
+      push('success', 'Gasto actualizado');
+    } else {
+      const { error } = await supabase.from('business_expenses').insert(rows);
+      if (error) { push('error', 'No se pudo registrar el gasto'); setSavingExpense(false); return; }
+      push('success', rows.length > 1 ? 'Gasto combinado registrado' : 'Gasto registrado');
+    }
+    setExpenseOpen(false);
+    await load();
+    setSavingExpense(false);
+  };
+
+  const confirmDeleteExpense = async () => {
+    if (!deleteExpense) return;
+    const { error } = await supabase.from('business_expenses').delete().eq('id', deleteExpense.id);
+    if (error) push('error', 'No se pudo eliminar el gasto');
+    else { push('success', 'Gasto eliminado'); await load(); }
+    setDeleteExpense(null);
+  };
+
   const methodLabel = (m: string) => PAYMENT_METHODS.find((p) => p.value === m)?.label ?? m;
 
   const selectedPurchaseForPay = supPayForm.purchase_id
@@ -532,13 +690,13 @@ export default function Purchases() {
     <div className="animate-fade-in">
       <PageHeader
         title="Compras"
-        description="Órdenes de compra y pagos a proveedores"
+        description="Ordenes de compra y pagos a proveedores"
         actions={
           tab === 'compras' ? (
             canCreate && <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
               <Plus size={16} /> Nueva compra
             </button>
-          ) : (
+          ) : tab === 'pagos' ? (
             <button
               className="btn-primary"
               onClick={() => {
@@ -550,11 +708,15 @@ export default function Purchases() {
             >
               <Plus size={16} /> Nuevo pago
             </button>
+          ) : (
+            <button className="btn-primary" onClick={openCreateExpense}>
+              <Plus size={16} /> Nuevo gasto
+            </button>
           )
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
         <div className="card p-5">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
@@ -562,7 +724,7 @@ export default function Purchases() {
             </div>
             <div>
               <p className="text-2xl font-bold text-ink-900">{filtered.length}</p>
-              <p className="text-sm text-ink-500">Órdenes esta semana</p>
+              <p className="text-sm text-ink-500">Ordenes esta semana</p>
             </div>
           </div>
         </div>
@@ -598,6 +760,17 @@ export default function Purchases() {
             <div>
               <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalPaidThisWeek)}</p>
               <p className="text-sm text-ink-500">Pagado esta semana</p>
+            </div>
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-danger-50 text-danger-600">
+              <FileText size={20} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalExpensesThisWeek)}</p>
+              <p className="text-sm text-ink-500">Gastos extras semana</p>
             </div>
           </div>
         </div>
@@ -641,6 +814,19 @@ export default function Purchases() {
             {filteredSupPayments.length}
           </span>
         </button>
+        <button
+          onClick={() => { setTab('gastos'); setSearch(''); }}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
+            tab === 'gastos'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-ink-500 hover:text-ink-700'
+          }`}
+        >
+          <FileText size={16} /> Gastos extras
+          <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
+            {filteredExpenses.length}
+          </span>
+        </button>
       </div>
 
       <div className="card p-4 mb-4">
@@ -649,7 +835,11 @@ export default function Purchases() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
             <input
               className="input pl-9"
-              placeholder={tab === 'compras' ? 'Buscar por folio o proveedor…' : 'Buscar por proveedor o referencia…'}
+              placeholder={
+                tab === 'compras' ? 'Buscar por folio o proveedor...' :
+                tab === 'gastos' ? 'Buscar por descripcion o categoria...' :
+                'Buscar por proveedor o referencia...'
+              }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -660,7 +850,7 @@ export default function Purchases() {
               value={methodFilter}
               onChange={(e) => setMethodFilter(e.target.value)}
             >
-              <option value="all">Todos los métodos</option>
+              <option value="all">Todos los metodos</option>
               {PAYMENT_METHODS.map((m) => (
                 <option key={m.value} value={m.value}>{m.label}</option>
               ))}
@@ -767,7 +957,7 @@ export default function Purchases() {
             </div>
           )}
         </div>
-      ) : (
+      ) : tab === 'pagos' ? (
         <div className="card overflow-hidden">
           {loading ? (
             <FullPageLoader />
@@ -775,7 +965,7 @@ export default function Purchases() {
             <EmptyState
               icon={Wallet}
               title="Sin pagos registrados"
-              description="Registra pagos a proveedores desde la tabla de compras o con el botón de arriba."
+              description="Registra pagos a proveedores desde la tabla de compras o con el boton de arriba."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -785,7 +975,7 @@ export default function Purchases() {
                     <th className="table-head">Fecha</th>
                     <th className="table-head">Proveedor</th>
                     <th className="table-head">Folio compra</th>
-                    <th className="table-head">Método</th>
+                    <th className="table-head">Metodo</th>
                     <th className="table-head">Referencia</th>
                     <th className="table-head text-right">Monto</th>
                     <th className="table-head text-right">Acciones</th>
@@ -829,6 +1019,85 @@ export default function Purchases() {
             </div>
           )}
         </div>
+      ) : (
+        /* ── Pestaña: Gastos extras ── */
+        <div className="card overflow-hidden">
+          {loading ? (
+            <FullPageLoader />
+          ) : filteredExpenses.length === 0 ? (
+            <EmptyState
+              icon={FileText}
+              title="Sin gastos registrados esta semana"
+              description="Registra gastos operativos como renta, servicios, gasolina, etc."
+              action={
+                <button className="btn-primary" onClick={openCreateExpense}>
+                  <Plus size={16} /> Nuevo gasto
+                </button>
+              }
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-ink-100">
+                <thead className="bg-ink-50/60">
+                  <tr>
+                    <th className="table-head">Fecha</th>
+                    <th className="table-head">Descripcion</th>
+                    <th className="table-head">Categoria</th>
+                    <th className="table-head">Metodo</th>
+                    <th className="table-head">Referencia</th>
+                    <th className="table-head text-right">Monto</th>
+                    <th className="table-head text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {filteredExpenses.map((e) => (
+                    <tr key={e.id} className="hover:bg-ink-50/60 transition">
+                      <td className="table-cell">{formatDate(e.expense_date)}</td>
+                      <td className="table-cell font-semibold text-ink-900">{e.description}</td>
+                      <td className="table-cell">
+                        <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">{e.category}</span>
+                      </td>
+                      <td className="table-cell">
+                        <Badge variant={e.payment_method === 'efectivo' ? 'success' : e.payment_method === 'banco' ? 'brand' : 'accent'}>
+                          {e.payment_method === 'efectivo' ? 'Efectivo' : e.payment_method === 'banco' ? 'Banco' : e.payment_method}
+                        </Badge>
+                      </td>
+                      <td className="table-cell text-ink-500">{e.reference ?? '—'}</td>
+                      <td className="table-cell text-right font-semibold text-danger-600">
+                        {formatCurrency(e.amount)}
+                      </td>
+                      <td className="table-cell text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEditExpense(e)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
+                            aria-label="Editar"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteExpense(e)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
+                            aria-label="Eliminar"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-ink-50">
+                    <td colSpan={5} className="table-cell text-right font-semibold text-ink-700">Total semana</td>
+                    <td className="table-cell text-right font-bold text-danger-600">{formatCurrency(totalExpensesThisWeek)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Purchase create/edit modal */}
@@ -849,7 +1118,7 @@ export default function Purchases() {
                 Cancelar
               </button>
               <button className="btn-primary" onClick={save} disabled={saving}>
-                {saving ? 'Guardando…' : 'Guardar compra'}
+                {saving ? 'Guardando...' : 'Guardar compra'}
               </button>
             </div>
           </div>
@@ -864,7 +1133,7 @@ export default function Purchases() {
                 value={form.supplier_id}
                 onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
               >
-                <option value="">Selecciona…</option>
+                <option value="">Selecciona...</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -896,7 +1165,7 @@ export default function Purchases() {
             <div className="flex items-center justify-between mb-2">
               <label className="label !mb-0">Productos</label>
               <button className="btn-ghost text-xs" onClick={addItem}>
-                <Plus size={14} /> Agregar línea
+                <Plus size={14} /> Agregar linea
               </button>
             </div>
             <div className="space-y-2">
@@ -904,10 +1173,7 @@ export default function Purchases() {
                 const product = products.find((p) => p.id === it.product_id);
                 const lineTotal = (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0);
                 return (
-                  <div
-                    key={it.id}
-                    className="rounded-lg border border-ink-200 bg-ink-50/40 p-3"
-                  >
+                  <div key={it.id} className="rounded-lg border border-ink-200 bg-ink-50/40 p-3">
                     <div className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="label">Producto</label>
@@ -916,7 +1182,7 @@ export default function Purchases() {
                           value={it.product_id}
                           onChange={(e) => onProductChange(it.id, e.target.value)}
                         >
-                          <option value="">Selecciona producto…</option>
+                          <option value="">Selecciona producto...</option>
                           {products.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name} ({p.sku})
@@ -1019,7 +1285,7 @@ export default function Purchases() {
               </label>
             </div>
             {!form.has_tax && (
-              <p className="text-xs text-ink-500">La compra se registrará sin impuestos. El total será igual al subtotal.</p>
+              <p className="text-xs text-ink-500">La compra se registrara sin impuestos. El total sera igual al subtotal.</p>
             )}
           </div>
 
@@ -1054,7 +1320,7 @@ export default function Purchases() {
                 />
               </div>
               <div>
-                <label className="label">Por pagar (crédito)</label>
+                <label className="label">Por pagar (credito)</label>
                 <input
                   className="input"
                   type="number"
@@ -1073,7 +1339,7 @@ export default function Purchases() {
                   className="text-xs font-semibold text-brand-600 hover:text-brand-700"
                   onClick={() => setPayments({ efectivo: '0', banco: '0', por_pagar: String(totals.total) })}
                 >
-                  Todo al crédito
+                  Todo al credito
                 </button>
                 <button
                   type="button"
@@ -1083,14 +1349,8 @@ export default function Purchases() {
                   Todo en efectivo
                 </button>
               </div>
-              <span
-                className={`text-xs font-semibold ${
-                  paymentBalanced ? 'text-success-600' : 'text-danger-600'
-                }`}
-              >
-                {paymentBalanced
-                  ? 'Cuadra con el total'
-                  : `Diferencia: ${formatCurrency(Math.abs(paymentDiff))}`}
+              <span className={`text-xs font-semibold ${paymentBalanced ? 'text-success-600' : 'text-danger-600'}`}>
+                {paymentBalanced ? 'Cuadra con el total' : `Diferencia: ${formatCurrency(Math.abs(paymentDiff))}`}
               </span>
             </div>
           </div>
@@ -1165,17 +1425,12 @@ export default function Purchases() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-ink-50/60">
-                    <td colSpan={3} className="table-cell text-right font-semibold">
-                      Total
-                    </td>
-                    <td className="table-cell text-right font-bold text-ink-900">
-                      {formatCurrency(detailOpen.total)}
-                    </td>
+                    <td colSpan={3} className="table-cell text-right font-semibold">Total</td>
+                    <td className="table-cell text-right font-bold text-ink-900">{formatCurrency(detailOpen.total)}</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
-
             <div>
               <h4 className="text-sm font-semibold text-ink-800 mb-2">Detalle de pago</h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1194,9 +1449,7 @@ export default function Purchases() {
                 <div className="rounded-lg bg-warning-50 p-3">
                   <p className="text-xs text-warning-600 uppercase font-semibold">Por pagar</p>
                   <p className="font-bold text-warning-700">
-                    {formatCurrency(
-                      detailOpen.total - detailPayments.reduce((a, b) => a + b.amount, 0),
-                    )}
+                    {formatCurrency(detailOpen.total - detailPayments.reduce((a, b) => a + b.amount, 0))}
                   </p>
                 </div>
                 <div className="rounded-lg bg-ink-50 p-3">
@@ -1214,7 +1467,7 @@ export default function Purchases() {
         open={supPayOpen}
         onClose={() => setSupPayOpen(false)}
         title={editingSupPay ? 'Editar pago a proveedor' : 'Registrar pago a proveedor'}
-        description={editingSupPay ? 'Modifica los datos del pago' : 'Registra un pago por una compra a crédito'}
+        description={editingSupPay ? 'Modifica los datos del pago' : 'Registra un pago por una compra a credito'}
         size="lg"
         footer={
           <>
@@ -1222,7 +1475,7 @@ export default function Purchases() {
               Cancelar
             </button>
             <button className="btn-success" onClick={saveSupPay} disabled={savingSupPay}>
-              {savingSupPay ? 'Guardando…' : 'Guardar pago'}
+              {savingSupPay ? 'Guardando...' : 'Guardar pago'}
             </button>
           </>
         }
@@ -1236,7 +1489,7 @@ export default function Purchases() {
                 value={supPayForm.supplier_id}
                 onChange={(e) => setSupPayForm({ ...supPayForm, supplier_id: e.target.value, purchase_id: '' })}
               >
-                <option value="">Selecciona…</option>
+                <option value="">Selecciona...</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -1262,7 +1515,7 @@ export default function Purchases() {
                   }
                 }}
               >
-                <option value="">Sin compra específica</option>
+                <option value="">Sin compra especifica</option>
                 {(purchases ?? [])
                   .filter((p) => !supPayForm.supplier_id || p.supplier_id === supPayForm.supplier_id)
                   .map((p) => {
@@ -1270,7 +1523,7 @@ export default function Purchases() {
                     return (
                       <option key={p.id} value={p.id}>
                         {p.invoice_number ?? 'Sin folio'} · {formatCurrency(p.total)}
-                        {bal > 0.005 ? ` (saldo: ${formatCurrency(bal)})` : ' ✓'}
+                        {bal > 0.005 ? ` (saldo: ${formatCurrency(bal)})` : ' ok'}
                       </option>
                     );
                   })}
@@ -1300,7 +1553,7 @@ export default function Purchases() {
           )}
 
           <div>
-            <label className="label">Método de pago</label>
+            <label className="label">Metodo de pago</label>
             <div className="grid grid-cols-3 gap-2">
               {PAYMENT_METHODS.filter((m) => m.value !== 'por_pagar').concat(PAYMENT_METHODS.filter((m) => m.value === 'por_pagar')).map((m) => {
                 const Icon = m.icon;
@@ -1370,10 +1623,162 @@ export default function Purchases() {
         </div>
       </Modal>
 
+      {/* Nuevo / Editar gasto extra */}
+      <Modal
+        open={expenseOpen}
+        onClose={() => setExpenseOpen(false)}
+        title={editingExpense ? 'Editar gasto' : 'Registrar gasto extra'}
+        description="Gastos operativos que no corresponden a compras de inventario"
+        size="lg"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setExpenseOpen(false)} disabled={savingExpense}>
+              Cancelar
+            </button>
+            <button className="btn-primary" onClick={saveExpense} disabled={savingExpense}>
+              {savingExpense ? 'Guardando...' : 'Guardar gasto'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
+              <label className="label">Descripcion *</label>
+              <input
+                className="input"
+                value={expenseForm.description}
+                onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+                placeholder="Ej. Pago de renta del local, gasolina del reparto..."
+              />
+            </div>
+            <div>
+              <label className="label">Categoria</label>
+              <select
+                className="input"
+                value={expenseForm.category}
+                onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
+              >
+                {EXPENSE_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Fecha</label>
+              <input
+                className="input"
+                type="date"
+                value={expenseForm.expense_date}
+                onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Metodo de pago</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 'efectivo',   label: 'Efectivo',   icon: Banknote },
+                { value: 'banco',      label: 'Banco',      icon: Building },
+                { value: 'combinado',  label: 'Combinado',  icon: Layers   },
+              ].map((m) => {
+                const Icon = m.icon;
+                const active = expenseForm.method === m.value;
+                return (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setExpenseForm({ ...expenseForm, method: m.value })}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
+                      active
+                        ? 'border-brand-500 bg-brand-50 text-brand-700'
+                        : 'border-ink-200 bg-white text-ink-600 hover:bg-ink-50'
+                    }`}
+                  >
+                    <Icon size={16} />
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {expenseForm.method === 'combinado' ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label flex items-center gap-1.5"><Banknote size={12} /> Efectivo</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={expenseForm.efectivo}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, efectivo: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="label flex items-center gap-1.5"><Building size={12} /> Banco</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={expenseForm.banco}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, banco: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-between rounded-lg bg-ink-50 p-3 text-sm">
+                <span className="text-ink-500">Total combinado</span>
+                <span className="font-bold text-ink-900">{formatCurrency(expenseCombinedTotal)}</span>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="label">Monto *</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={expenseForm.amount}
+                onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                placeholder="0.00"
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Referencia</label>
+              <input
+                className="input"
+                value={expenseForm.reference}
+                onChange={(e) => setExpenseForm({ ...expenseForm, reference: e.target.value })}
+                placeholder="Recibo, folio de transferencia, etc."
+              />
+            </div>
+            <div>
+              <label className="label">Notas</label>
+              <input
+                className="input"
+                value={expenseForm.notes}
+                onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
+                placeholder="Notas internas"
+              />
+            </div>
+          </div>
+        </div>
+      </Modal>
+
       <ConfirmDialog
         open={!!deleteTarget}
         title="Eliminar compra"
-        message="Se eliminará la compra y sus productos. El stock se revertirá automáticamente."
+        message="Se eliminara la compra y sus productos. El stock se revertira automaticamente."
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
@@ -1381,14 +1786,18 @@ export default function Purchases() {
       <ConfirmDialog
         open={!!deleteSupPay}
         title="Eliminar pago"
-        message="¿Eliminar este pago al proveedor? El saldo de la cuenta por pagar se recalculará."
+        message="Eliminar este pago al proveedor? El saldo de la cuenta por pagar se recalculara."
         onConfirm={confirmDeleteSupPay}
         onCancel={() => setDeleteSupPay(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteExpense}
+        title="Eliminar gasto"
+        message="Eliminar este gasto? Esta accion no se puede deshacer."
+        onConfirm={confirmDeleteExpense}
+        onCancel={() => setDeleteExpense(null)}
       />
     </div>
   );
 }
-
-
-
-
