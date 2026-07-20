@@ -11,6 +11,8 @@ import {
   AlertCircle,
   Receipt,
   Pencil,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Collection, Customer, Sale } from '../lib/types';
@@ -66,8 +68,31 @@ const emptyPaymentForm = (): PaymentForm => ({
 
 type Props = { onDataChanged?: () => void };
 
+// ─── Edit-sale types ───────────────────────────────────────────────────────
+
+type SaleItemEdit = {
+  id?: string;        // existing row id (undefined = new)
+  product_id: string;
+  product_name: string;
+  quantity: string;
+  unit_price: string;
+  cost_price: number;
+  has_tax: boolean;
+};
+
+type EditSaleForm = {
+  sale_id: string;
+  invoice_number: string;
+  sale_date: string;
+  customer_id: string;
+  apply_tax: boolean;
+  items: SaleItemEdit[];
+};
+
+// ─── component ────────────────────────────────────────────────────────────────
+
 export default function Collections({ onDataChanged }: Props) {
-  const { can } = useAuth();
+  const { can, isAdmin } = useAuth();
   const canEdit = can('collections:edit');
   const { push } = useToast();
   const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas'>('entregas');
@@ -86,6 +111,12 @@ export default function Collections({ onDataChanged }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<CollectionRow | null>(null);
   const [confirmDelivery, setConfirmDelivery] = useState<SaleRow | null>(null);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
+
+  // ── edit-sale modal state ──────────────────────────────────────────────────
+  const [editSaleOpen, setEditSaleOpen] = useState(false);
+  const [editSaleForm, setEditSaleForm] = useState<EditSaleForm | null>(null);
+  const [editSaleProducts, setEditSaleProducts] = useState<{ id: string; name: string; cost_price: number; price: number }[]>([]);
+  const [savingSale, setSavingSale] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -397,6 +428,128 @@ export default function Collections({ onDataChanged }: Props) {
     setDeleteTarget(null);
   };
 
+  // ── open edit-sale modal ──────────────────────────────────────────────────
+
+  const openEditSale = async (sale: SaleRow) => {
+    // Fetch products catalogue + existing sale_items in parallel
+    const [prodRes, itemsRes] = await Promise.all([
+      supabase.from('products').select('id, name, cost_price, price').order('name'),
+      supabase.from('sale_items').select('id, product_id, quantity, unit_price, has_tax, product:products(name, cost_price)').eq('sale_id', sale.id),
+    ]);
+    const prods = (prodRes.data ?? []) as { id: string; name: string; cost_price: number; price: number }[];
+    setEditSaleProducts(prods);
+
+    const items: SaleItemEdit[] = ((itemsRes.data ?? []) as unknown as {
+      id: string; product_id: string; quantity: number; unit_price: number; has_tax: boolean;
+      product: { name: string; cost_price: number } | null;
+    }[]).map((it) => ({
+      id: it.id,
+      product_id: it.product_id,
+      product_name: it.product?.name ?? '',
+      quantity: String(it.quantity),
+      unit_price: String(it.unit_price),
+      cost_price: it.product?.cost_price ?? 0,
+      has_tax: it.has_tax ?? false,
+    }));
+
+    setEditSaleForm({
+      sale_id: sale.id,
+      invoice_number: sale.invoice_number ?? '',
+      sale_date: toDateInputValue(new Date(sale.sale_date)),
+      customer_id: sale.customer_id,
+      apply_tax: items.some((it) => it.has_tax),
+      items,
+    });
+    setEditSaleOpen(true);
+  };
+
+  const saveEditedSale = async () => {
+    if (!editSaleForm) return;
+    setSavingSale(true);
+
+    const items = editSaleForm.items.filter((it) => it.product_id && Number(it.quantity) > 0);
+    if (items.length === 0) {
+      push('error', 'La venta debe tener al menos un producto');
+      setSavingSale(false);
+      return;
+    }
+
+    const subtotal = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
+    const tax = editSaleForm.apply_tax ? subtotal * 0.16 : 0;
+    const total = subtotal + tax;
+
+    // Update parent sale
+    const { error: saleErr } = await supabase.from('sales').update({
+      customer_id: editSaleForm.customer_id,
+      sale_date: fromDateInputValue(editSaleForm.sale_date),
+      subtotal,
+      tax,
+      total,
+    }).eq('id', editSaleForm.sale_id);
+
+    if (saleErr) {
+      push('error', 'No se pudo actualizar la venta');
+      setSavingSale(false);
+      return;
+    }
+
+    // Delete existing items and re-insert
+    await supabase.from('sale_items').delete().eq('sale_id', editSaleForm.sale_id);
+
+    const newItems = items.map((it) => ({
+      sale_id: editSaleForm.sale_id,
+      product_id: it.product_id,
+      quantity: Number(it.quantity),
+      unit_price: Number(it.unit_price),
+      subtotal: Number(it.quantity) * Number(it.unit_price),
+      has_tax: editSaleForm.apply_tax,
+    }));
+
+    const { error: itemsErr } = await supabase.from('sale_items').insert(newItems);
+
+    if (itemsErr) {
+      push('error', 'Venta actualizada pero hubo un error en los productos');
+    } else {
+      push('success', 'Venta actualizada correctamente');
+      setEditSaleOpen(false);
+      setEditSaleForm(null);
+      await load();
+      onDataChanged?.();
+    }
+    setSavingSale(false);
+  };
+
+  const addEditSaleItem = () => {
+    if (!editSaleForm) return;
+    setEditSaleForm({
+      ...editSaleForm,
+      items: [
+        ...editSaleForm.items,
+        { product_id: '', product_name: '', quantity: '1', unit_price: '0', cost_price: 0, has_tax: false },
+      ],
+    });
+  };
+
+  const removeEditSaleItem = (idx: number) => {
+    if (!editSaleForm) return;
+    setEditSaleForm({ ...editSaleForm, items: editSaleForm.items.filter((_, i) => i !== idx) });
+  };
+
+  const updateEditSaleItem = (idx: number, field: keyof SaleItemEdit, value: string | boolean) => {
+    if (!editSaleForm) return;
+    const items = editSaleForm.items.map((it, i) => {
+      if (i !== idx) return it;
+      if (field === 'product_id') {
+        const prod = editSaleProducts.find((p) => p.id === value);
+        return { ...it, product_id: String(value), product_name: prod?.name ?? '', unit_price: String(prod?.price ?? '0'), cost_price: prod?.cost_price ?? 0 };
+      }
+      return { ...it, [field]: value };
+    });
+    setEditSaleForm({ ...editSaleForm, items });
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   const selectedCustomer = customers.find((c) => c.id === paymentForm.customer_id);
   const targetBalance = paymentTarget
     ? paymentTarget.total - (paidBySale.get(paymentTarget.id) ?? 0)
@@ -652,6 +805,15 @@ export default function Collections({ onDataChanged }: Props) {
                         </td>
                         <td className="table-cell text-right">
                           <div className="flex items-center justify-end gap-1">
+                            {isAdmin && (
+                              <button
+                                onClick={() => openEditSale(s)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                                title="Editar venta"
+                              >
+                                <Pencil size={13} /> Editar venta
+                              </button>
+                            )}
                             {canEdit && (
                             <button
                               onClick={() => openRegisterPayment(s)}
@@ -1094,6 +1256,170 @@ export default function Collections({ onDataChanged }: Props) {
         onCancel={() => setDeleteTarget(null)}
       />
       <SaleReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />
+
+      {/* ── Modal: Editar venta (admin only) ── */}
+      {editSaleForm && (
+        <Modal
+          open={editSaleOpen}
+          onClose={() => { setEditSaleOpen(false); setEditSaleForm(null); }}
+          title="Editar venta"
+          description={`Folio ${editSaleForm.invoice_number || '—'} · modifica productos y totales`}
+          size="xl"
+          footer={
+            <>
+              <button className="btn-secondary" onClick={() => { setEditSaleOpen(false); setEditSaleForm(null); }} disabled={savingSale}>
+                Cancelar
+              </button>
+              <button className="btn-primary" onClick={saveEditedSale} disabled={savingSale}>
+                {savingSale ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-5">
+
+            {/* date + customer */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Fecha de venta</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={editSaleForm.sale_date}
+                  onChange={(e) => setEditSaleForm({ ...editSaleForm, sale_date: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Cliente</label>
+                <select
+                  className="input"
+                  value={editSaleForm.customer_id}
+                  onChange={(e) => setEditSaleForm({ ...editSaleForm, customer_id: e.target.value })}
+                >
+                  <option value="">Selecciona…</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* IVA toggle */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setEditSaleForm({ ...editSaleForm, apply_tax: !editSaleForm.apply_tax })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${editSaleForm.apply_tax ? 'bg-brand-600' : 'bg-ink-300'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${editSaleForm.apply_tax ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+              <span className="text-sm font-medium text-ink-700">Aplicar IVA 16%</span>
+            </div>
+
+            {/* product lines */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="label mb-0">Productos</label>
+                <button type="button" onClick={addEditSaleItem} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700">
+                  <Plus size={14} /> Agregar línea
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-ink-200 overflow-hidden">
+                <table className="min-w-full divide-y divide-ink-100">
+                  <thead className="bg-ink-50">
+                    <tr>
+                      <th className="table-head">Producto</th>
+                      <th className="table-head text-right w-24">Cant.</th>
+                      <th className="table-head text-right w-32">Precio unit.</th>
+                      <th className="table-head text-right w-32">Subtotal</th>
+                      <th className="table-head w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {editSaleForm.items.map((it, idx) => {
+                      const sub = Number(it.quantity) * Number(it.unit_price);
+                      return (
+                        <tr key={idx}>
+                          <td className="table-cell">
+                            <select
+                              className="input py-1 text-sm"
+                              value={it.product_id}
+                              onChange={(e) => updateEditSaleItem(idx, 'product_id', e.target.value)}
+                            >
+                              <option value="">Selecciona…</option>
+                              {editSaleProducts.map((p) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="table-cell">
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              className="input py-1 text-sm text-right w-20"
+                              value={it.quantity}
+                              onChange={(e) => updateEditSaleItem(idx, 'quantity', e.target.value)}
+                            />
+                          </td>
+                          <td className="table-cell">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              className="input py-1 text-sm text-right w-28"
+                              value={it.unit_price}
+                              onChange={(e) => updateEditSaleItem(idx, 'unit_price', e.target.value)}
+                            />
+                          </td>
+                          <td className="table-cell text-right font-semibold text-ink-800">
+                            {formatCurrency(sub)}
+                          </td>
+                          <td className="table-cell">
+                            <button
+                              type="button"
+                              onClick={() => removeEditSaleItem(idx)}
+                              className="rounded p-1 text-ink-400 hover:text-danger-600 hover:bg-danger-50 transition"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* totals summary */}
+            {editSaleForm.items.length > 0 && (() => {
+              const subtotal = editSaleForm.items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
+              const tax = editSaleForm.apply_tax ? subtotal * 0.16 : 0;
+              return (
+                <div className="rounded-lg bg-ink-50 p-4 space-y-1.5 text-sm">
+                  <div className="flex justify-between text-ink-600">
+                    <span>Subtotal</span>
+                    <span className="font-semibold text-ink-800">{formatCurrency(subtotal)}</span>
+                  </div>
+                  {editSaleForm.apply_tax && (
+                    <div className="flex justify-between text-ink-600">
+                      <span>IVA (16%)</span>
+                      <span className="font-semibold text-ink-800">{formatCurrency(tax)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t border-ink-200 pt-1.5 font-bold text-ink-900">
+                    <span>Total</span>
+                    <span>{formatCurrency(subtotal + tax)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
