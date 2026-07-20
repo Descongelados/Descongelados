@@ -11,6 +11,8 @@ import {
   RefreshCw,
   ShoppingCart,
   Package,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/format';
@@ -35,6 +37,29 @@ function currentWeekRange() {
   return { from: isoDate(monday), to: isoDate(sunday) };
 }
 
+/** Returns a period bucket key and display label for a given ISO date string */
+function getPeriodKey(dateStr: string, grouping: 'dia' | 'semana' | 'mes'): { key: string; label: string } {
+  const d = new Date(dateStr + 'T12:00:00'); // midday to avoid TZ edge cases
+  if (grouping === 'dia') {
+    const key = isoDate(d);
+    return { key, label: formatDate(key) };
+  }
+  if (grouping === 'mes') {
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+    return { key, label: label.charAt(0).toUpperCase() + label.slice(1) };
+  }
+  // semana — ISO week (Mon–Sun)
+  const day = d.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const mon = new Date(d);
+  mon.setDate(d.getDate() + diffToMonday);
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  const key = isoDate(mon);
+  return { key, label: `${formatDate(isoDate(mon))} – ${formatDate(isoDate(sun))}` };
+}
+
 // ─── types ───────────────────────────────────────────────────────────────────
 
 type SaleRow = {
@@ -50,7 +75,13 @@ type SaleRow = {
 type CollectionRow = { amount: number; payment_method: string };
 type PurchaseRow = { total: number };
 type SupplierPaymentRow = { amount: number; payment_method: string };
-type SaleItemRow = { quantity: number; unit_price: number; subtotal: number; product: { name: string; cost_price: number } | null };
+type SaleItemRow = {
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  sale_date: string;
+  product: { name: string; cost_price: number } | null;
+};
 
 type ReportData = {
   sales: SaleRow[];
@@ -58,6 +89,13 @@ type ReportData = {
   purchases: PurchaseRow[];
   supplierPayments: SupplierPaymentRow[];
   saleItems: SaleItemRow[];
+};
+
+type PeriodGroup = {
+  key: string;
+  label: string;
+  products: { name: string; qty: number; total: number }[];
+  periodTotal: number;
 };
 
 // ─── bar chart (pure SVG) ────────────────────────────────────────────────────
@@ -167,6 +205,17 @@ export default function Reports() {
   const [error, setError] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
+  // ── "productos por período" state ──────────────────────────────────────────
+  const [grouping, setGrouping] = useState<'dia' | 'semana' | 'mes'>('dia');
+  const [openPeriods, setOpenPeriods] = useState<Set<string>>(new Set());
+
+  const togglePeriod = (key: string) =>
+    setOpenPeriods((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
   const runReport = async () => {
     if (!from || !to) return;
     setLoading(true);
@@ -201,15 +250,26 @@ export default function Reports() {
         .lte('payment_date', end),
     ]);
 
-    // Fetch sale_items scoped to the sales in range
+    // Fetch sale_items scoped to the sales in range — include sale_date via join
     let saleItems: SaleItemRow[] = [];
     if (!salesRes.error && salesRes.data && salesRes.data.length > 0) {
       const saleIds = salesRes.data.map((s) => s.id);
+      // Build a lookup: sale_id → sale_date
+      const saleDateMap = new Map<string, string>(
+        salesRes.data.map((s) => [s.id, s.sale_date as string])
+      );
       const { data: itemData } = await supabase
         .from('sale_items')
-        .select('quantity, unit_price, subtotal, product:products(name, cost_price)')
+        .select('quantity, unit_price, subtotal, sale_id, product:products(name, cost_price)')
         .in('sale_id', saleIds);
-      saleItems = (itemData ?? []) as unknown as SaleItemRow[];
+
+      saleItems = ((itemData ?? []) as unknown as (SaleItemRow & { sale_id: string })[]).map((it) => ({
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        subtotal: it.subtotal,
+        sale_date: saleDateMap.get((it as unknown as { sale_id: string }).sale_id) ?? from,
+        product: it.product,
+      }));
     }
 
     if (salesRes.error || collectionsRes.error || purchasesRes.error || spRes.error) {
@@ -298,6 +358,47 @@ export default function Reports() {
       topProducts,
     };
   }, [reportData]);
+
+  // ── productos por período ──────────────────────────────────────────────────
+
+  const productsByPeriod = useMemo((): PeriodGroup[] => {
+    if (!reportData) return [];
+    const { saleItems } = reportData;
+    if (saleItems.length === 0) return [];
+
+    // Map: periodKey → { label, productName → { qty, total } }
+    const periodMap = new Map<string, { label: string; products: Map<string, { qty: number; total: number }> }>();
+
+    for (const it of saleItems) {
+      const { key, label } = getPeriodKey(it.sale_date, grouping);
+      if (!periodMap.has(key)) {
+        periodMap.set(key, { label, products: new Map() });
+      }
+      const period = periodMap.get(key)!;
+      const name = it.product?.name ?? 'Desconocido';
+      const existing = period.products.get(name) ?? { qty: 0, total: 0 };
+      period.products.set(name, {
+        qty: existing.qty + Number(it.quantity),
+        total: existing.total + it.subtotal,
+      });
+    }
+
+    // Sort periods chronologically
+    return [...periodMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, { label, products }]) => {
+        const sorted = [...products.entries()]
+          .map(([name, { qty, total }]) => ({ name, qty, total }))
+          .sort((a, b) => b.total - a.total);
+        const periodTotal = sorted.reduce((s, p) => s + p.total, 0);
+        return { key, label, products: sorted, periodTotal };
+      });
+  }, [reportData, grouping]);
+
+  const grandTotal = useMemo(
+    () => productsByPeriod.reduce((s, g) => s + g.periodTotal, 0),
+    [productsByPeriod]
+  );
 
   const handlePrint = () => window.print();
 
@@ -519,6 +620,130 @@ export default function Reports() {
             </section>
           )}
 
+          {/* ── productos vendidos por período ── */}
+          <section className="card overflow-hidden">
+            {/* section header + grouping toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 border-b border-ink-100 bg-ink-50/50">
+              <h3 className="text-sm font-semibold text-ink-700 flex items-center gap-2">
+                <Package size={16} className="text-ink-500" />
+                Productos vendidos por período
+                {productsByPeriod.length > 0 && (
+                  <span className="ml-1 font-normal text-ink-400">
+                    ({productsByPeriod.reduce((s, g) => s + g.products.length, 0)} líneas)
+                  </span>
+                )}
+              </h3>
+              {/* grouping buttons */}
+              <div className="flex gap-1">
+                {(['dia', 'semana', 'mes'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setGrouping(g)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                      grouping === g
+                        ? 'bg-brand-600 text-white'
+                        : 'bg-ink-100 text-ink-600 hover:bg-ink-200'
+                    }`}
+                  >
+                    {g === 'dia' ? 'Día' : g === 'semana' ? 'Semana' : 'Mes'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {productsByPeriod.length === 0 ? (
+              <EmptyState
+                icon={Package}
+                title="Sin productos vendidos en este período"
+                description="No se encontraron líneas de venta en el rango seleccionado."
+              />
+            ) : (
+              <div className="divide-y divide-ink-100">
+                {productsByPeriod.map((group) => (
+                  <div key={group.key}>
+                    {/* period header row — clickable to collapse */}
+                    <button
+                      type="button"
+                      onClick={() => togglePeriod(group.key)}
+                      className="w-full flex items-center justify-between px-5 py-3 hover:bg-ink-50/80 transition text-left"
+                    >
+                      <span className="flex items-center gap-2 text-sm font-semibold text-ink-800">
+                        {openPeriods.has(group.key)
+                          ? <ChevronDown size={15} className="text-ink-400" />
+                          : <ChevronRight size={15} className="text-ink-400" />
+                        }
+                        {group.label}
+                        <span className="font-normal text-ink-400 text-xs">
+                          ({group.products.length} producto{group.products.length !== 1 ? 's' : ''})
+                        </span>
+                      </span>
+                      <span className="text-sm font-bold text-ink-900 shrink-0">
+                        {formatCurrency(group.periodTotal)}
+                      </span>
+                    </button>
+
+                    {/* collapsible product rows */}
+                    {openPeriods.has(group.key) && (
+                      <div className="overflow-x-auto border-t border-ink-100">
+                        <table className="min-w-full divide-y divide-ink-50">
+                          <thead className="bg-ink-50/40">
+                            <tr>
+                              <th className="table-head pl-12">Producto</th>
+                              <th className="table-head text-right">Cantidad</th>
+                              <th className="table-head text-right">Total</th>
+                              <th className="table-head text-right">%</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-ink-50">
+                            {group.products.map((p, idx) => (
+                              <tr key={idx} className="hover:bg-ink-50/60 transition">
+                                <td className="table-cell pl-12 font-medium text-ink-900">{p.name}</td>
+                                <td className="table-cell text-right text-ink-700">
+                                  {p.qty % 1 === 0 ? p.qty : p.qty.toFixed(2)}
+                                </td>
+                                <td className="table-cell text-right font-semibold text-ink-900">
+                                  {formatCurrency(p.total)}
+                                </td>
+                                <td className="table-cell text-right text-ink-400 text-xs">
+                                  {group.periodTotal > 0
+                                    ? ((p.total / group.periodTotal) * 100).toFixed(1) + '%'
+                                    : '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-ink-50">
+                              <td className="table-cell pl-12 font-semibold text-ink-700">Subtotal período</td>
+                              <td className="table-cell text-right font-semibold text-ink-700">
+                                {group.products.reduce((s, p) => s + p.qty, 0) % 1 === 0
+                                  ? group.products.reduce((s, p) => s + p.qty, 0)
+                                  : group.products.reduce((s, p) => s + p.qty, 0).toFixed(2)
+                                }
+                              </td>
+                              <td className="table-cell text-right font-bold text-ink-900">
+                                {formatCurrency(group.periodTotal)}
+                              </td>
+                              <td className="table-cell text-right text-ink-400 text-xs">100%</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {/* grand total row */}
+                <div className="flex items-center justify-between px-5 py-3 bg-ink-50 border-t border-ink-200">
+                  <span className="text-sm font-bold text-ink-800">
+                    Total general ({productsByPeriod.length} período{productsByPeriod.length !== 1 ? 's' : ''})
+                  </span>
+                  <span className="text-sm font-bold text-ink-900">{formatCurrency(grandTotal)}</span>
+                </div>
+              </div>
+            )}
+          </section>
+
           {/* ── sales list ── */}
           <section className="card overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-ink-50/50">
@@ -583,4 +808,3 @@ export default function Reports() {
     </div>
   );
 }
-
