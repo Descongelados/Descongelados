@@ -18,6 +18,8 @@ import PageHeader from '../components/ui/PageHeader';
 import { FullPageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
 
+// ─── helpers ────────────────────────────────────────────────────────────────
+
 function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -33,36 +35,7 @@ function currentWeekRange() {
   return { from: isoDate(monday), to: isoDate(sunday) };
 }
 
-/** Returns YYYY-MM-DD label for the period bucket of a given date */
-function periodKey(dateStr: string, grouping: 'day' | 'week' | 'month'): string {
-  const d = new Date(dateStr + 'T12:00:00');
-  if (grouping === 'day') return isoDate(d);
-  if (grouping === 'month') {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  }
-  // week: Monday of that week
-  const day = d.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(d);
-  monday.setDate(d.getDate() + diffToMonday);
-  return isoDate(monday);
-}
-
-/** Human-readable label for a period key */
-function periodLabel(key: string, grouping: 'day' | 'week' | 'month'): string {
-  if (grouping === 'day') return formatDate(key);
-  if (grouping === 'month') {
-    const [year, month] = key.split('-');
-    return new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(
-      new Date(Number(year), Number(month) - 1, 1),
-    );
-  }
-  // week: "Sem. DD MMM – DD MMM"
-  const monday = new Date(key + 'T12:00:00');
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return `Sem. ${formatDate(key)} – ${formatDate(isoDate(sunday))}`;
-}
+// ─── types ───────────────────────────────────────────────────────────────────
 
 type SaleRow = {
   id: string;
@@ -77,13 +50,7 @@ type SaleRow = {
 type CollectionRow = { amount: number; payment_method: string };
 type PurchaseRow = { total: number };
 type SupplierPaymentRow = { amount: number; payment_method: string };
-type SaleItemRow = {
-  quantity: number;
-  unit_price: number;
-  subtotal: number;
-  product: { name: string; cost_price: number } | null;
-  sale: { sale_date: string } | null;
-};
+type SaleItemRow = { quantity: number; unit_price: number; subtotal: number; product: { name: string; cost_price: number } | null };
 
 type ReportData = {
   sales: SaleRow[];
@@ -92,6 +59,8 @@ type ReportData = {
   supplierPayments: SupplierPaymentRow[];
   saleItems: SaleItemRow[];
 };
+
+// ─── bar chart (pure SVG) ────────────────────────────────────────────────────
 
 function BarChart({
   bars,
@@ -139,6 +108,8 @@ function BarChart({
   );
 }
 
+// ─── donut chart (pure SVG) ──────────────────────────────────────────────────
+
 function DonutChart({ slices }: { slices: { label: string; value: number; color: string }[] }) {
   const total = slices.reduce((s, x) => s + x.value, 0);
   if (total === 0) return <p className="text-sm text-ink-400 text-center py-6">Sin datos</p>;
@@ -185,7 +156,7 @@ function DonutChart({ slices }: { slices: { label: string; value: number; color:
   );
 }
 
-type PeriodGrouping = 'day' | 'week' | 'month';
+// ─── main component ───────────────────────────────────────────────────────────
 
 export default function Reports() {
   const defaultRange = currentWeekRange();
@@ -194,8 +165,6 @@ export default function Reports() {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [periodGrouping, setPeriodGrouping] = useState<PeriodGrouping>('day');
-  const [expandedPeriod, setExpandedPeriod] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   const runReport = async () => {
@@ -232,12 +201,13 @@ export default function Reports() {
         .lte('payment_date', end),
     ]);
 
+    // Fetch sale_items scoped to the sales in range
     let saleItems: SaleItemRow[] = [];
     if (!salesRes.error && salesRes.data && salesRes.data.length > 0) {
       const saleIds = salesRes.data.map((s) => s.id);
       const { data: itemData } = await supabase
         .from('sale_items')
-        .select('quantity, unit_price, subtotal, product:products(name, cost_price), sale:sales(sale_date)')
+        .select('quantity, unit_price, subtotal, product:products(name, cost_price)')
         .in('sale_id', saleIds);
       saleItems = (itemData ?? []) as unknown as SaleItemRow[];
     }
@@ -258,11 +228,14 @@ export default function Reports() {
     setLoading(false);
   };
 
+  // run on mount with default range
   useEffect(() => { runReport(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── derived metrics ──────────────────────────────────────────────────────
 
   const metrics = useMemo(() => {
     if (!reportData) return null;
-    const { collections, purchases, supplierPayments, saleItems } = reportData;
+    const { sales, collections, purchases, supplierPayments, saleItems } = reportData;
 
     const totalPurchases = purchases.reduce((s, r) => s + r.total, 0);
 
@@ -286,14 +259,15 @@ export default function Reports() {
       .reduce((s, p) => s + p.amount, 0);
     const totalPaid = supplierPayments.reduce((s, p) => s + p.amount, 0);
 
+    // Ganancia real: Σ (precio_venta − costo_compra) × cantidad  por cada línea vendida
     const ganancia = saleItems.reduce((acc, it) => {
       const costPrice = it.product?.cost_price ?? 0;
       return acc + (it.unit_price - costPrice) * it.quantity;
     }, 0);
-    const totalCobradoVenta = colEfectivo + colBanco;
-    const gananciaEfectivo = totalCobradoVenta > 0 ? ganancia * (colEfectivo / totalCobradoVenta) : 0;
-    const gananciaBanco = totalCobradoVenta > 0 ? ganancia * (colBanco / totalCobradoVenta) : 0;
+    const gananciaEfectivo = colEfectivo - spEfectivo;
+    const gananciaBanco = colBanco - spBanco;
 
+    // products sold
     const productMap = new Map<string, { name: string; qty: number; total: number }>();
     for (const it of saleItems) {
       const name = it.product?.name ?? 'Desconocido';
@@ -304,10 +278,8 @@ export default function Reports() {
         total: existing.total + it.subtotal,
       });
     }
-    const productsSold = [...productMap.values()]
-      .sort((a, b) => a.name.localeCompare(b.name));
     const topProducts = [...productMap.values()]
-      .sort((a, b) => b.qty - a.qty || b.total - a.total)
+      .sort((a, b) => b.total - a.total)
       .slice(0, 8);
 
     return {
@@ -323,52 +295,17 @@ export default function Reports() {
       ganancia,
       gananciaEfectivo,
       gananciaBanco,
-      productsSold,
       topProducts,
     };
   }, [reportData]);
-
-  /** Products sold grouped by period (day/week/month) */
-  const productsByPeriod = useMemo(() => {
-    if (!reportData) return [];
-    const { saleItems } = reportData;
-
-    // Map: periodKey -> productName -> { qty, total }
-    const periodMap = new Map<string, Map<string, { qty: number; total: number }>>();
-
-    for (const it of saleItems) {
-      const saleDate = it.sale?.sale_date;
-      if (!saleDate) continue;
-      const pKey = periodKey(saleDate, periodGrouping);
-      const name = it.product?.name ?? 'Desconocido';
-
-      if (!periodMap.has(pKey)) periodMap.set(pKey, new Map());
-      const prods = periodMap.get(pKey)!;
-      const prev = prods.get(name) ?? { qty: 0, total: 0 };
-      prods.set(name, {
-        qty: prev.qty + Number(it.quantity),
-        total: prev.total + it.subtotal,
-      });
-    }
-
-    return [...periodMap.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([pKey, prods]) => ({
-        key: pKey,
-        label: periodLabel(pKey, periodGrouping),
-        products: [...prods.entries()]
-          .map(([name, v]) => ({ name, qty: v.qty, total: v.total }))
-          .sort((a, b) => b.qty - a.qty),
-        totalQty: [...prods.values()].reduce((s, v) => s + v.qty, 0),
-        totalAmount: [...prods.values()].reduce((s, v) => s + v.total, 0),
-      }));
-  }, [reportData, periodGrouping]);
 
   const handlePrint = () => window.print();
 
   const rangeLabel = from && to
     ? `${formatDate(from)} – ${formatDate(to)}`
     : 'Período seleccionado';
+
+  // ── render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="animate-fade-in">
@@ -386,6 +323,7 @@ export default function Reports() {
         }
       />
 
+      {/* ── date range picker ── */}
       <div className="card p-4 mb-6">
         <div className="flex flex-col sm:flex-row gap-3 items-end">
           <div className="flex-1">
@@ -430,6 +368,8 @@ export default function Reports() {
 
       {!loading && !error && reportData && metrics && (
         <div ref={printRef} className="space-y-6 receipt-print-area">
+
+          {/* ── period header for print ── */}
           <div className="hidden print:flex items-center justify-between border-b border-ink-200 pb-3 mb-4">
             <div>
               <h1 className="text-xl font-bold text-ink-900">Reporte financiero</h1>
@@ -438,9 +378,12 @@ export default function Reports() {
             <p className="text-xs text-ink-400">Comprobante interno · no fiscal</p>
           </div>
 
+          {/* ── KPI grid ── */}
           <section>
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500 mb-3">Resumen del período · {rangeLabel}</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+              {/* Ventas */}
               <div className="card p-5 space-y-3">
                 <div className="flex items-center gap-2">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-success-50 text-success-600">
@@ -463,6 +406,7 @@ export default function Reports() {
                 </div>
               </div>
 
+              {/* Gastos */}
               <div className="card p-5 space-y-3">
                 <div className="flex items-center gap-2">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-danger-50 text-danger-600">
@@ -485,6 +429,7 @@ export default function Reports() {
                 </div>
               </div>
 
+              {/* Ganancia */}
               <div className="card p-5 space-y-3">
                 <div className="flex items-center gap-2">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${metrics.ganancia >= 0 ? 'bg-brand-50 text-brand-600' : 'bg-danger-50 text-danger-600'}`}>
@@ -512,10 +457,14 @@ export default function Reports() {
                   </div>
                 </div>
               </div>
+
             </div>
           </section>
 
+          {/* ── charts row ── */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+            {/* Ventas vs Gastos */}
             <div className="card p-5">
               <h3 className="text-sm font-semibold text-ink-800 mb-4 flex items-center gap-2">
                 <BarChart2 size={16} className="text-brand-500" /> Ventas vs Gastos
@@ -529,6 +478,7 @@ export default function Reports() {
               />
             </div>
 
+            {/* Formas de pago */}
             <div className="card p-5">
               <h3 className="text-sm font-semibold text-ink-800 mb-4 flex items-center gap-2">
                 <Wallet size={16} className="text-brand-500" /> Formas de pago (cobranza)
@@ -541,8 +491,10 @@ export default function Reports() {
                 ]}
               />
             </div>
+
           </section>
 
+          {/* ── top products chart ── */}
           {metrics.topProducts.length > 0 && (
             <section className="card p-5">
               <h3 className="text-sm font-semibold text-ink-800 mb-4 flex items-center gap-2">
@@ -567,175 +519,7 @@ export default function Reports() {
             </section>
           )}
 
-          {/* ── Productos vendidos por periodo ── */}
-          <section className="card overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-3 border-b border-ink-100 bg-ink-50/50">
-              <div className="flex items-center gap-2 flex-1">
-                <Package size={16} className="text-ink-500" />
-                <h3 className="text-sm font-semibold text-ink-700">
-                  Productos vendidos por período
-                  <span className="ml-2 font-normal text-ink-400">({productsByPeriod.length} {productsByPeriod.length === 1 ? 'período' : 'períodos'})</span>
-                </h3>
-              </div>
-              <div className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white p-0.5 text-xs">
-                {(['day', 'week', 'month'] as PeriodGrouping[]).map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => { setPeriodGrouping(g); setExpandedPeriod(null); }}
-                    className={`px-3 py-1 rounded-md font-medium transition-colors ${
-                      periodGrouping === g
-                        ? 'bg-brand-600 text-white'
-                        : 'text-ink-600 hover:bg-ink-100'
-                    }`}
-                  >
-                    {g === 'day' ? 'Día' : g === 'week' ? 'Semana' : 'Mes'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {productsByPeriod.length === 0 ? (
-              <EmptyState
-                icon={Package}
-                title="Sin productos vendidos en este período"
-                description="No se encontraron productos vendidos en el rango seleccionado."
-              />
-            ) : (
-              <div className="divide-y divide-ink-100">
-                {productsByPeriod.map((period) => {
-                  const isExpanded = expandedPeriod === period.key;
-                  return (
-                    <div key={period.key}>
-                      {/* Period header row — click to expand/collapse */}
-                      <button
-                        className="w-full flex items-center justify-between px-5 py-3 hover:bg-ink-50/60 transition text-left"
-                        onClick={() => setExpandedPeriod(isExpanded ? null : period.key)}
-                        aria-expanded={isExpanded}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs font-mono text-ink-400 w-4 select-none">
-                            {isExpanded ? '▾' : '▸'}
-                          </span>
-                          <span className="text-sm font-semibold text-ink-800">{period.label}</span>
-                          <span className="text-xs text-ink-400">
-                            {period.products.length} {period.products.length === 1 ? 'producto' : 'productos'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-6 text-sm">
-                          <span className="text-ink-500">
-                            <span className="font-medium text-ink-800">
-                              {period.totalQty % 1 === 0 ? period.totalQty : period.totalQty.toFixed(2)}
-                            </span>{' '}
-                            uds
-                          </span>
-                          <span className="font-semibold text-ink-900 min-w-[90px] text-right">
-                            {formatCurrency(period.totalAmount)}
-                          </span>
-                        </div>
-                      </button>
-
-                      {/* Expanded product list */}
-                      {isExpanded && (
-                        <div className="bg-ink-50/30 border-t border-ink-100">
-                          <table className="min-w-full divide-y divide-ink-100">
-                            <thead>
-                              <tr className="bg-ink-50/60">
-                                <th className="table-head pl-12">Producto</th>
-                                <th className="table-head text-right">Cantidad vendida</th>
-                                <th className="table-head text-right">Total vendido</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-ink-100">
-                              {period.products.map((p) => (
-                                <tr key={p.name} className="hover:bg-ink-50/60 transition">
-                                  <td className="table-cell pl-12 font-medium text-ink-800">{p.name}</td>
-                                  <td className="table-cell text-right text-ink-700">
-                                    {p.qty % 1 === 0 ? p.qty : p.qty.toFixed(2)}
-                                  </td>
-                                  <td className="table-cell text-right font-semibold text-ink-900">
-                                    {formatCurrency(p.total)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr className="bg-ink-100/60">
-                                <td className="table-cell pl-12 font-semibold text-ink-700">Total del período</td>
-                                <td className="table-cell text-right font-semibold text-ink-800">
-                                  {period.totalQty % 1 === 0 ? period.totalQty : period.totalQty.toFixed(2)}
-                                </td>
-                                <td className="table-cell text-right font-bold text-ink-900">
-                                  {formatCurrency(period.totalAmount)}
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* Grand total row */}
-                <div className="flex items-center justify-between px-5 py-3 bg-ink-50 border-t border-ink-200">
-                  <span className="text-sm font-semibold text-ink-700">Total general</span>
-                  <div className="flex items-center gap-6 text-sm">
-                    <span className="text-ink-500">
-                      <span className="font-semibold text-ink-800">
-                        {(() => {
-                          const total = productsByPeriod.reduce((s, p) => s + p.totalQty, 0);
-                          return total % 1 === 0 ? total : total.toFixed(2);
-                        })()}
-                      </span>{' '}
-                      uds
-                    </span>
-                    <span className="font-bold text-ink-900 min-w-[90px] text-right">
-                      {formatCurrency(productsByPeriod.reduce((s, p) => s + p.totalAmount, 0))}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-
-          <section className="card overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-ink-50/50">
-              <Package size={16} className="text-ink-500" />
-              <h3 className="text-sm font-semibold text-ink-700">
-                Productos vendidos del período
-                <span className="ml-2 font-normal text-ink-400">({metrics.productsSold.length} productos)</span>
-              </h3>
-            </div>
-            {metrics.productsSold.length === 0 ? (
-              <EmptyState
-                icon={Package}
-                title="Sin productos vendidos en este período"
-                description="No se encontraron productos vendidos en el rango seleccionado."
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-ink-100">
-                  <thead className="bg-ink-50/60">
-                    <tr>
-                      <th className="table-head">Producto</th>
-                      <th className="table-head text-right">Cantidad vendida</th>
-                      <th className="table-head text-right">Total vendido</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-ink-100">
-                    {metrics.productsSold.map((p) => (
-                      <tr key={p.name} className="hover:bg-ink-50/60 transition">
-                        <td className="table-cell font-semibold text-ink-900">{p.name}</td>
-                        <td className="table-cell text-right">{p.qty % 1 === 0 ? p.qty : p.qty.toFixed(2)}</td>
-                        <td className="table-cell text-right">{formatCurrency(p.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
+          {/* ── sales list ── */}
           <section className="card overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-ink-50/50">
               <TrendingUp size={16} className="text-ink-500" />
@@ -793,8 +577,10 @@ export default function Reports() {
               </div>
             )}
           </section>
+
         </div>
       )}
     </div>
   );
 }
+

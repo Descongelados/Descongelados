@@ -112,9 +112,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         supplierPaymentsRes,
         lowStockRes,
         recentSalesRes,
-        allCollectionsRes,
       ] = await Promise.all([
-        applyWeek(supabase.from('sales').select('id, total').eq('status', 'confirmada'), 'sale_date'),
+        applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
         applyWeek(supabase.from('collections').select('amount, payment_method'), 'collection_date'),
         applyWeek(supabase.from('supplier_payments').select('amount, payment_method'), 'payment_date'),
@@ -126,8 +125,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .lte('sale_date', `${sunday}T23:59:59`)
           .order('sale_date', { ascending: false })
           .limit(10),
-        // Todos los pagos de cobranza (cualquier fecha) para calcular saldo real por venta
-        supabase.from('collections').select('sale_id, amount'),
       ]);
 
       if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
@@ -135,28 +132,18 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         return;
       }
 
-      const totalPurchases = ((purchasesRes.data ?? []) as Array<{ total: number }>)
-        .reduce((acc, r) => acc + r.total, 0);
+      const sum = (rows: Array<{ total?: number; amount?: number }>) =>
+        rows.reduce((acc, r) => acc + (r.total ?? r.amount ?? 0), 0);
+
+      const totalSales = sum((salesRes.data ?? []) as Array<{ total: number }>);
+      const totalPurchases = sum((purchasesRes.data ?? []) as Array<{ total: number }>);
 
       type PayRow = { amount: number; payment_method: string };
       const collections = (collectionsRes.data ?? []) as PayRow[];
       const supplierPayments = (supplierPaymentsRes.data ?? []) as PayRow[];
 
-      // Ventas totales = lo efectivamente cobrado esta semana (efectivo + banco + por_pagar)
       const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
-      const totalSales = totalCollected;
       const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
-
-      // Calcular Por cobrar real: suma de saldos pendientes por venta de esta semana
-      // usando todos los pagos registrados (cualquier fecha), igual que Collections
-      type CollectionBySale = { sale_id: string | null; amount: number };
-      const paidBySale = new Map<string, number>();
-      for (const c of ((allCollectionsRes.data ?? []) as CollectionBySale[])) {
-        if (c.sale_id) paidBySale.set(c.sale_id, (paidBySale.get(c.sale_id) ?? 0) + c.amount);
-      }
-      type SaleWithId = { id: string; total: number };
-      const totalToCollect = ((salesRes.data ?? []) as SaleWithId[])
-        .reduce((acc, s) => acc + Math.max(0, s.total - (paidBySale.get(s.id) ?? 0)), 0);
 
       // efectivo = cobros en efectivo de ventas esta semana
       const cashSales = collections
@@ -174,7 +161,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         totalSales,
         totalPurchases,
         totalCollected,
-        totalToCollect,
+        totalToCollect: totalSales - totalCollected,
         totalToPay: totalPurchases - totalPaid,
         cashSales,
         cashExpenses,

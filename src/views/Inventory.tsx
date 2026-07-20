@@ -243,20 +243,8 @@ const ACTION_COLORS: Record<InventoryLog['action'], string> = {
   sale:     'bg-accent-100 text-accent-700',
 };
 
-// Movimiento sintético construido en el frontend sin depender de inventory_logs
-type Movement = {
-  id: string;
-  product_name: string;
-  product_sku: string;
-  action: 'sale' | 'purchase' | 'created' | 'edited' | 'deleted';
-  delta: number | null;
-  changed_by: string | null;
-  notes: string | null;
-  created_at: string;
-};
-
 function InventoryLogTab() {
-  const [movements, setMovements] = useState<Movement[] | null>(null);
+  const [logs, setLogs] = useState<InventoryLog[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -264,122 +252,28 @@ function InventoryLogTab() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-
-      // Siempre últimos 7 días
-      const since = new Date();
-      since.setDate(since.getDate() - 7);
-      since.setHours(0, 0, 0, 0);
-      const sinceISO = since.toISOString();
-
-      // Limpiar inventory_logs de más de 30 días (silencioso, no bloquea)
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 30);
-      supabase.from('inventory_logs').delete().lt('created_at', cutoff.toISOString()).then(() => {});
-
-      // ── Ventas + sus líneas ─────────────────────────────────────────────
-      const salesQuery = supabase
-        .from('sales')
-        .select('id, invoice_number, sale_date')
-        .gte('sale_date', sinceISO)
-        .order('sale_date', { ascending: false });
-
-      const purchasesQuery = supabase
-        .from('purchases')
-        .select('id, invoice_number, purchase_date')
-        .gte('purchase_date', sinceISO)
-        .order('purchase_date', { ascending: false });
-
-      const [
-        { data: sales },
-        { data: purchases },
-        { data: saleItems },
-        { data: purchaseItems },
-        { data: prods },
-        { data: invLogs },
-      ] = await Promise.all([
-        salesQuery,
-        purchasesQuery,
-        supabase.from('sale_items').select('sale_id, product_id, quantity'),
-        supabase.from('purchase_items').select('purchase_id, product_id, quantity'),
-        supabase.from('products').select('id, name, sku'),
-        // inventory_logs may not exist — handle error gracefully
-        supabase.from('inventory_logs').select('*').order('created_at', { ascending: false }).limit(200),
-      ]);
-
-      type ProdRow = { id: string; name: string; sku: string };
-      type SaleRow = { id: string; invoice_number: string | null; sale_date: string };
-      type PurchaseRow = { id: string; invoice_number: string | null; purchase_date: string };
-      type SaleItemRow = { sale_id: string; product_id: string; quantity: number };
-      type PurchaseItemRow = { purchase_id: string; product_id: string; quantity: number };
-
-      const prodMap = new Map(((prods ?? []) as ProdRow[]).map((p) => [p.id, p]));
-      const result: Movement[] = [];
-
-      // Build one row per product-line per sale
-      for (const s of ((sales ?? []) as SaleRow[])) {
-        const folio = s.invoice_number ?? s.id.slice(0, 8);
-        const lines = ((saleItems ?? []) as SaleItemRow[]).filter((si) => si.sale_id === s.id);
-        if (lines.length === 0) {
-          result.push({ id: `sale-${s.id}`, product_name: '—', product_sku: '—',
-            action: 'sale', delta: null, changed_by: null, notes: `Venta ${folio}`, created_at: s.sale_date });
-        } else {
-          for (const li of lines) {
-            const prod = prodMap.get(li.product_id);
-            result.push({ id: `sale-${s.id}-${li.product_id}`,
-              product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? '—',
-              action: 'sale', delta: -li.quantity, changed_by: null,
-              notes: `Venta ${folio}`, created_at: s.sale_date });
-          }
-        }
-      }
-
-      // Build one row per product-line per purchase
-      for (const p of ((purchases ?? []) as PurchaseRow[])) {
-        const folio = p.invoice_number ?? p.id.slice(0, 8);
-        const lines = ((purchaseItems ?? []) as PurchaseItemRow[]).filter((pi) => pi.purchase_id === p.id);
-        if (lines.length === 0) {
-          result.push({ id: `pur-${p.id}`, product_name: '—', product_sku: '—',
-            action: 'purchase', delta: null, changed_by: null, notes: `Compra ${folio}`, created_at: p.purchase_date });
-        } else {
-          for (const li of lines) {
-            const prod = prodMap.get(li.product_id);
-            result.push({ id: `pur-${p.id}-${li.product_id}`,
-              product_name: prod?.name ?? 'Eliminado', product_sku: prod?.sku ?? '—',
-              action: 'purchase', delta: li.quantity, changed_by: null,
-              notes: `Compra ${folio}`, created_at: p.purchase_date });
-          }
-        }
-      }
-
-      // Append inventory_logs rows (manual adjustments, created, edited, deleted) if available
-      for (const l of ((invLogs ?? []) as InventoryLog[])) {
-        if (l.action === 'sale' || l.action === 'purchase') continue; // already in result
-        result.push({ id: l.id, product_name: l.product_name, product_sku: l.product_sku,
-          action: l.action, delta: l.delta ?? null, changed_by: l.changed_by,
-          notes: l.notes, created_at: l.created_at });
-      }
-
-      // Sort all by date desc
-      result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-      setMovements(result);
+      const { data } = await supabase
+        .from('inventory_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      setLogs((data ?? []) as InventoryLog[]);
       setLoading(false);
     };
     load();
   }, []);
 
   const filtered = useMemo(() => {
-    if (!movements) return [];
-    return movements.filter((m) => {
-      const matchesAction = actionFilter === 'all' || m.action === actionFilter;
+    if (!logs) return [];
+    return logs.filter((l) => {
+      const matchesAction = actionFilter === 'all' || l.action === actionFilter;
       const matchesSearch =
         !search ||
-        m.product_name.toLowerCase().includes(search.toLowerCase()) ||
-        m.product_sku.toLowerCase().includes(search.toLowerCase()) ||
-        (m.notes ?? '').toLowerCase().includes(search.toLowerCase());
+        l.product_name.toLowerCase().includes(search.toLowerCase()) ||
+        l.product_sku.toLowerCase().includes(search.toLowerCase());
       return matchesAction && matchesSearch;
     });
-  }, [movements, actionFilter, search]);
+  }, [logs, actionFilter, search]);
 
   if (loading) return <FullPageLoader />;
 
@@ -392,7 +286,7 @@ function InventoryLogTab() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
             <input
               className="input pl-9"
-              placeholder="Buscar por producto, SKU o folio…"
+              placeholder="Buscar por producto o SKU…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -409,7 +303,6 @@ function InventoryLogTab() {
             <option value="purchase">Compra</option>
             <option value="sale">Venta</option>
           </select>
-          <span className="text-xs text-ink-400 whitespace-nowrap">Últimos 7 días</span>
         </div>
       </div>
 
@@ -419,7 +312,7 @@ function InventoryLogTab() {
           <EmptyState
             icon={ClipboardList}
             title="Sin movimientos"
-            description="No hay movimientos en el periodo seleccionado."
+            description="Los cambios en el inventario aparecerán aquí."
           />
         ) : (
           <div className="overflow-x-auto">
@@ -429,38 +322,49 @@ function InventoryLogTab() {
                   <th className="table-head">Fecha</th>
                   <th className="table-head">Producto</th>
                   <th className="table-head">Acción</th>
+                  <th className="table-head text-right">Stock anterior</th>
+                  <th className="table-head text-right">Stock nuevo</th>
                   <th className="table-head text-right">Cambio</th>
                   <th className="table-head">Usuario</th>
-                  <th className="table-head">Folio / Notas</th>
+                  <th className="table-head">Notas</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {filtered.map((m) => (
-                  <tr key={m.id} className="hover:bg-ink-50/60 transition">
-                    <td className="table-cell text-xs text-ink-500 whitespace-nowrap">
-                      {formatDateTime(m.created_at)}
-                    </td>
-                    <td className="table-cell">
-                      <div className="font-semibold text-ink-900">{m.product_name}</div>
-                      {m.product_sku !== '—' && <div className="text-xs text-ink-500">SKU {m.product_sku}</div>}
-                    </td>
-                    <td className="table-cell">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${ACTION_COLORS[m.action]}`}>
-                        {ACTION_LABELS[m.action]}
-                      </span>
-                    </td>
-                    <td className="table-cell text-right font-semibold">
-                      {m.delta != null ? (
-                        <span className={`flex items-center justify-end gap-0.5 ${m.delta > 0 ? 'text-success-600' : m.delta < 0 ? 'text-danger-600' : 'text-ink-400'}`}>
-                          {m.delta > 0 ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
-                          {m.delta > 0 ? '+' : ''}{formatNumber(m.delta, 3)}
+                {filtered.map((l) => {
+                  const delta = l.delta ?? 0;
+                  return (
+                    <tr key={l.id} className="hover:bg-ink-50/60 transition">
+                      <td className="table-cell text-xs text-ink-500 whitespace-nowrap">
+                        {formatDateTime(l.created_at)}
+                      </td>
+                      <td className="table-cell">
+                        <div className="font-semibold text-ink-900">{l.product_name}</div>
+                        <div className="text-xs text-ink-500">SKU {l.product_sku}</div>
+                      </td>
+                      <td className="table-cell">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${ACTION_COLORS[l.action]}`}>
+                          {ACTION_LABELS[l.action]}
                         </span>
-                      ) : '—'}
-                    </td>
-                    <td className="table-cell text-ink-600 text-sm">{m.changed_by ?? '—'}</td>
-                    <td className="table-cell text-ink-500 text-xs">{m.notes ?? '—'}</td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="table-cell text-right text-ink-700">
+                        {l.stock_before != null ? formatNumber(l.stock_before, 3) : '—'}
+                      </td>
+                      <td className="table-cell text-right text-ink-700">
+                        {l.stock_after != null ? formatNumber(l.stock_after, 3) : '—'}
+                      </td>
+                      <td className="table-cell text-right font-semibold">
+                        {l.stock_before != null && l.stock_after != null ? (
+                          <span className={`flex items-center justify-end gap-0.5 ${delta > 0 ? 'text-success-600' : delta < 0 ? 'text-danger-600' : 'text-ink-400'}`}>
+                            {delta > 0 ? <ArrowUp size={13} /> : delta < 0 ? <ArrowDown size={13} /> : null}
+                            {delta > 0 ? '+' : ''}{formatNumber(delta, 3)}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="table-cell text-ink-600 text-sm">{l.changed_by ?? '—'}</td>
+                      <td className="table-cell text-ink-500 text-xs">{l.notes ?? '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

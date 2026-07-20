@@ -11,11 +11,9 @@ import {
   AlertCircle,
   Receipt,
   Pencil,
-  Plus,
-  X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Collection, Customer, Product, Sale } from '../lib/types';
+import { Collection, Customer, Sale } from '../lib/types';
 import { formatCurrency, formatDate, fromDateInputValue, toDateInputValue } from '../lib/format';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
@@ -66,20 +64,16 @@ const emptyPaymentForm = (): PaymentForm => ({
   notes: '',
 });
 
-type ItemRow = { id: string; product_id: string; quantity: string; unit_price: string };
-const TAX_RATE = 0.16;
-
 type Props = { onDataChanged?: () => void };
 
 export default function Collections({ onDataChanged }: Props) {
-  const { can, isAdmin, currentUser } = useAuth();
+  const { can } = useAuth();
   const canEdit = can('collections:edit');
   const { push } = useToast();
   const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas'>('entregas');
   const [sales, setSales] = useState<SaleRow[] | null>(null);
   const [collections, setCollections] = useState<CollectionRow[] | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -93,22 +87,9 @@ export default function Collections({ onDataChanged }: Props) {
   const [confirmDelivery, setConfirmDelivery] = useState<SaleRow | null>(null);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
 
-  // ── Edit-sale modal (admin only) ────────────────────────────────────────────
-  const [editSaleOpen, setEditSaleOpen] = useState(false);
-  const [editSaleTarget, setEditSaleTarget] = useState<SaleRow | null>(null);
-  const [editSaleItems, setEditSaleItems] = useState<ItemRow[]>([]);
-  const [editSaleForm, setEditSaleForm] = useState({
-    customer_id: '',
-    invoice_number: '',
-    sale_date: toDateInputValue(new Date()),
-    notes: '',
-    has_tax: true,
-  });
-  const [editSaleSaving, setEditSaleSaving] = useState(false);
-
   const load = async () => {
     setLoading(true);
-    const [sRes, cRes, custRes, prodRes] = await Promise.all([
+    const [sRes, cRes, custRes] = await Promise.all([
       supabase
         .from('sales')
         .select('*, customer:customers(*)')
@@ -119,7 +100,6 @@ export default function Collections({ onDataChanged }: Props) {
         .select('*, customer:customers(*), sale:sales(*)')
         .order('collection_date', { ascending: false }),
       supabase.from('customers').select('*').order('name'),
-      supabase.from('products').select('*').order('name'),
     ]);
     if (sRes.error) {
       push('error', 'No se pudieron cargar las ventas');
@@ -134,7 +114,6 @@ export default function Collections({ onDataChanged }: Props) {
       setCollections(cRes.data as CollectionRow[]);
     }
     if (!custRes.error) setCustomers(custRes.data as Customer[]);
-    if (!prodRes.error) setProducts(prodRes.data as Product[]);
     setLoading(false);
   };
 
@@ -243,8 +222,7 @@ export default function Collections({ onDataChanged }: Props) {
   }, [tab, pendingDeliveries, deliveredSalesWeek, search]);
 
   const totalCollectedToday = useMemo(() => {
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const today = new Date().toISOString().slice(0, 10);
     return (collections ?? [])
       .filter((c) => c.collection_date.slice(0, 10) === today)
       .reduce((acc, c) => acc + c.amount, 0);
@@ -423,101 +401,6 @@ export default function Collections({ onDataChanged }: Props) {
   const targetBalance = paymentTarget
     ? paymentTarget.total - (paidBySale.get(paymentTarget.id) ?? 0)
     : 0;
-
-  // ── Edit-sale helpers (admin only) ─────────────────────────────────────────
-  const editSaleTotals = useMemo(() => {
-    const subtotal = editSaleItems.reduce(
-      (acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
-      0,
-    );
-    const tax = editSaleForm.has_tax ? subtotal * TAX_RATE : 0;
-    return { subtotal, tax, total: subtotal + tax };
-  }, [editSaleItems, editSaleForm.has_tax]);
-
-  const openEditSale = async (s: SaleRow) => {
-    const { data: existingItems } = await supabase
-      .from('sale_items')
-      .select('*')
-      .eq('sale_id', s.id);
-    setEditSaleForm({
-      customer_id: s.customer_id,
-      invoice_number: s.invoice_number ?? '',
-      sale_date: toDateInputValue(s.sale_date),
-      notes: s.notes ?? '',
-      has_tax: Number(s.tax) > 0,
-    });
-    setEditSaleItems(
-      (existingItems ?? []).map((it) => ({
-        id: it.id,
-        product_id: it.product_id,
-        quantity: String(it.quantity),
-        unit_price: String(it.unit_price),
-      })),
-    );
-    setEditSaleTarget(s);
-    setEditSaleOpen(true);
-  };
-
-  const saveEditSale = async () => {
-    if (!editSaleTarget) return;
-    if (!editSaleForm.customer_id) { push('error', 'Selecciona un cliente'); return; }
-    const validItems = editSaleItems.filter((it) => it.product_id && Number(it.quantity) > 0);
-    if (validItems.length === 0) { push('error', 'Agrega al menos un producto'); return; }
-    setEditSaleSaving(true);
-    const payload = {
-      customer_id: editSaleForm.customer_id,
-      invoice_number: editSaleForm.invoice_number.trim() || null,
-      sale_date: fromDateInputValue(editSaleForm.sale_date),
-      notes: editSaleForm.notes.trim() || null,
-      subtotal: editSaleTotals.subtotal,
-      tax: editSaleTotals.tax,
-      total: editSaleTotals.total,
-    };
-    const { error } = await supabase.from('sales').update(payload).eq('id', editSaleTarget.id);
-    if (error) { push('error', 'No se pudo actualizar la venta'); setEditSaleSaving(false); return; }
-    await supabase.from('sale_items').delete().eq('sale_id', editSaleTarget.id);
-    const { error: itemErr } = await supabase.from('sale_items').insert(
-      validItems.map((it) => ({
-        sale_id: editSaleTarget.id,
-        product_id: it.product_id,
-        quantity: Number(it.quantity),
-        unit_price: Number(it.unit_price),
-        subtotal: Number(it.quantity) * Number(it.unit_price),
-      })),
-    );
-    if (itemErr) { push('error', 'No se guardaron los productos'); setEditSaleSaving(false); return; }
-    await supabase.from('inventory_logs').insert(
-      validItems.map((it) => {
-        const p = products.find((pr) => pr.id === it.product_id);
-        const before = p ? p.stock : 0;
-        return {
-          product_id: it.product_id, product_name: p?.name ?? '', product_sku: p?.sku ?? '',
-          action: 'sale', stock_before: before, stock_after: before - Number(it.quantity),
-          changed_by: currentUser?.name ?? null,
-          notes: `Venta editada desde cobranza ${editSaleForm.invoice_number}`,
-        };
-      }),
-    );
-    push('success', 'Venta actualizada');
-    setEditSaleOpen(false);
-    await load();
-    onDataChanged?.();
-    setEditSaleSaving(false);
-  };
-
-  const addEditSaleItem = () =>
-    setEditSaleItems([...editSaleItems, { id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
-
-  const updateEditSaleItem = (id: string, patch: Partial<ItemRow>) =>
-    setEditSaleItems(editSaleItems.map((it) => (it.id === id ? { ...it, ...patch } : it)));
-
-  const removeEditSaleItem = (id: string) =>
-    setEditSaleItems(editSaleItems.filter((it) => it.id !== id));
-
-  const onEditSaleProductChange = (id: string, productId: string) => {
-    const product = products.find((p) => p.id === productId);
-    updateEditSaleItem(id, { product_id: productId, unit_price: product ? String(product.sale_price) : '0' });
-  };
 
   return (
     <div className="animate-fade-in">
@@ -776,15 +659,6 @@ export default function Collections({ onDataChanged }: Props) {
                             >
                               <Wallet size={14} /> Registrar pago
                             </button>
-                            )}
-                            {isAdmin && (
-                              <button
-                                onClick={() => openEditSale(s)}
-                                className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
-                                title="Editar venta"
-                              >
-                                <Pencil size={13} /> Editar venta
-                              </button>
                             )}
                             <button
                               onClick={() => setReceiptSale(s)}
@@ -1220,185 +1094,6 @@ export default function Collections({ onDataChanged }: Props) {
         onCancel={() => setDeleteTarget(null)}
       />
       <SaleReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />
-
-      {/* ── Modal: Editar venta (admin only) ─────────────────────────────── */}
-      <Modal
-        open={editSaleOpen}
-        onClose={() => setEditSaleOpen(false)}
-        title={`Editar venta · ${editSaleTarget?.invoice_number ?? ''}`}
-        description={`Cliente: ${editSaleTarget?.customer?.name ?? ''}`}
-        size="xl"
-        footer={
-          <div className="flex items-center justify-between w-full">
-            <div className="text-sm text-ink-600">
-              <span className="text-ink-400">Total: </span>
-              <span className="font-bold text-ink-900 text-base">{formatCurrency(editSaleTotals.total)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="btn-secondary" onClick={() => setEditSaleOpen(false)} disabled={editSaleSaving}>
-                Cancelar
-              </button>
-              <button className="btn-primary" onClick={saveEditSale} disabled={editSaleSaving}>
-                {editSaleSaving ? 'Guardando…' : 'Guardar cambios'}
-              </button>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="label">Cliente *</label>
-              <select
-                className="input"
-                value={editSaleForm.customer_id}
-                onChange={(e) => setEditSaleForm({ ...editSaleForm, customer_id: e.target.value })}
-              >
-                <option value="">Selecciona…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Folio / Factura</label>
-              <input
-                className="input bg-ink-50 text-ink-600 font-mono"
-                value={editSaleForm.invoice_number}
-                readOnly
-              />
-            </div>
-            <div>
-              <label className="label">Fecha</label>
-              <input
-                className="input"
-                type="date"
-                value={editSaleForm.sale_date}
-                onChange={(e) => setEditSaleForm({ ...editSaleForm, sale_date: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="label !mb-0">Productos</label>
-              <button className="btn-ghost text-xs" onClick={addEditSaleItem}>
-                <Plus size={14} /> Agregar línea
-              </button>
-            </div>
-            <div className="space-y-2">
-              {editSaleItems.map((it) => {
-                const product = products.find((p) => p.id === it.product_id);
-                const lineTotal = (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
-                return (
-                  <div key={it.id} className="rounded-lg border border-ink-200 bg-ink-50/40 p-3">
-                    <div className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-12 sm:col-span-5">
-                        <label className="label">Producto</label>
-                        <select
-                          className="input"
-                          value={it.product_id}
-                          onChange={(e) => onEditSaleProductChange(it.id, e.target.value)}
-                        >
-                          <option value="">Selecciona producto…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>{p.name} ({p.sku}) — stock {p.stock}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="col-span-5 sm:col-span-2">
-                        <label className="label">Cantidad</label>
-                        <input
-                          className="input"
-                          type="number"
-                          step="0.001"
-                          min="0"
-                          value={it.quantity}
-                          onChange={(e) => updateEditSaleItem(it.id, { quantity: e.target.value })}
-                        />
-                      </div>
-                      <div className="col-span-5 sm:col-span-2">
-                        <label className="label">Precio unit.</label>
-                        <input
-                          className="input"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={it.unit_price}
-                          onChange={(e) => updateEditSaleItem(it.id, { unit_price: e.target.value })}
-                        />
-                      </div>
-                      <div className="col-span-2 sm:col-span-2">
-                        <label className="label">Subtotal</label>
-                        <div className="text-right text-sm font-semibold text-ink-900 pt-2">
-                          {formatCurrency(lineTotal)}
-                        </div>
-                      </div>
-                      <div className="col-span-12 sm:col-span-1 flex justify-end">
-                        <button
-                          onClick={() => removeEditSaleItem(it.id)}
-                          className="rounded-lg p-1.5 text-ink-400 hover:bg-danger-50 hover:text-danger-600 transition"
-                          aria-label="Quitar"
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                    </div>
-                    {product && (
-                      <div className="mt-1.5 text-xs text-ink-500 pl-1">
-                        Stock disponible: {product.stock} {product.unit}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {editSaleItems.length === 0 && (
-                <p className="text-sm text-ink-400 text-center py-4">Agrega al menos un producto.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Notas</label>
-              <textarea
-                className="input"
-                rows={2}
-                value={editSaleForm.notes}
-                onChange={(e) => setEditSaleForm({ ...editSaleForm, notes: e.target.value })}
-                placeholder="Notas internas (opcional)"
-              />
-            </div>
-            <div className="rounded-lg bg-ink-50 p-4 space-y-1.5">
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-500">Subtotal</span>
-                <span className="font-medium text-ink-800">{formatCurrency(editSaleTotals.subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-500">Impuesto {editSaleForm.has_tax ? '(16%)' : '(0%)'}</span>
-                <span className="font-medium text-ink-800">{formatCurrency(editSaleTotals.tax)}</span>
-              </div>
-              <div className="flex justify-between pt-1.5 border-t border-ink-200">
-                <span className="font-semibold text-ink-900">Total</span>
-                <span className="font-bold text-ink-900 text-base">{formatCurrency(editSaleTotals.total)}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-ink-200 p-4">
-            <label className="inline-flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={editSaleForm.has_tax}
-                onChange={(e) => setEditSaleForm({ ...editSaleForm, has_tax: e.target.checked })}
-                className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-200"
-              />
-              <span className="text-sm text-ink-700">Aplicar IVA (16%)</span>
-            </label>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
-

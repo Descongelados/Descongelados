@@ -14,8 +14,6 @@ import {
   Building,
   CheckCircle2,
   TrendingUp,
-  FileText,
-  Layers,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Product, Purchase, PurchaseItem, Supplier, SupplierPayment } from '../lib/types';
@@ -37,56 +35,6 @@ type ItemRow = {
   unit_cost: string;
 };
 type PaymentRow = SupplierPayment & { supplier: Supplier | null; purchase: Purchase | null };
-
-type BusinessExpense = {
-  id: string;
-  description: string;
-  category: string;
-  amount: number;
-  payment_method: string;
-  expense_date: string;
-  reference: string | null;
-  notes: string | null;
-  created_by: string | null;
-  created_at: string;
-};
-
-const EXPENSE_CATEGORIES = [
-  'Renta / Local',
-  'Servicios (luz, agua, gas)',
-  'Gasolina / Transporte',
-  'Salarios / Nómina',
-  'Mantenimiento',
-  'Publicidad / Marketing',
-  'Equipo / Herramientas',
-  'Limpieza / Suministros',
-  'Impuestos / Trámites',
-  'Otro',
-];
-
-type ExpenseForm = {
-  description: string;
-  category: string;
-  amount: string;
-  method: string;   // 'efectivo' | 'banco' | 'combinado'
-  efectivo: string;
-  banco: string;
-  expense_date: string;
-  reference: string;
-  notes: string;
-};
-
-const emptyExpenseForm = (): ExpenseForm => ({
-  description: '',
-  category: 'Otro',
-  amount: '',
-  method: 'efectivo',
-  efectivo: '',
-  banco: '',
-  expense_date: toDateInputValue(new Date()),
-  reference: '',
-  notes: '',
-});
 
 const TAX_RATE = 0.16;
 
@@ -137,13 +85,13 @@ function getWeekRange(): { monday: Date; sunday: Date } {
 }
 
 export default function Purchases() {
-  const { can, currentUser } = useAuth();
+  const { can } = useAuth();
   const canCreate = can('purchases:create');
   const canEdit   = can('purchases:edit');
   const canDelete = can('purchases:delete');
 
   const { push } = useToast();
-  const [tab, setTab] = useState<'compras' | 'pagos' | 'gastos'>('compras');
+  const [tab, setTab] = useState<'compras' | 'pagos'>('compras');
 
   const [purchases, setPurchases] = useState<PurchaseRow[] | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -152,14 +100,6 @@ export default function Purchases() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState('all');
-
-  // Gastos extras
-  const [expenses, setExpenses] = useState<BusinessExpense[]>([]);
-  const [expenseOpen, setExpenseOpen] = useState(false);
-  const [editingExpense, setEditingExpense] = useState<BusinessExpense | null>(null);
-  const [deleteExpense, setDeleteExpense] = useState<BusinessExpense | null>(null);
-  const [expenseForm, setExpenseForm] = useState<ExpenseForm>(emptyExpenseForm());
-  const [savingExpense, setSavingExpense] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState<PurchaseRow | null>(null);
@@ -189,7 +129,7 @@ export default function Purchases() {
 
   const load = async () => {
     setLoading(true);
-    const [pRes, sRes, prodRes, paysRes, supPaysRes, expRes] = await Promise.all([
+    const [pRes, sRes, prodRes, paysRes, supPaysRes] = await Promise.all([
       supabase.from('purchases').select('*, supplier:suppliers(*)').order('purchase_date', { ascending: false }),
       supabase.from('suppliers').select('*').order('name'),
       supabase.from('products').select('*').order('name'),
@@ -198,7 +138,6 @@ export default function Purchases() {
         .from('supplier_payments')
         .select('*, supplier:suppliers(*), purchase:purchases(*)')
         .order('payment_date', { ascending: false }),
-      supabase.from('business_expenses').select('*').order('expense_date', { ascending: false }),
     ]);
     if (pRes.error) {
       push('error', 'No se pudieron cargar las compras');
@@ -210,7 +149,6 @@ export default function Purchases() {
     if (!prodRes.error) setProducts(prodRes.data as Product[]);
     setPaymentByPurchase((paysRes.data ?? []) as Array<{ purchase_id: string; amount: number; payment_method: string }>);
     if (!supPaysRes.error) setSupPayments(supPaysRes.data as PaymentRow[]);
-    if (!expRes.error) setExpenses((expRes.data ?? []) as BusinessExpense[]);
     setLoading(false);
   };
 
@@ -316,106 +254,6 @@ export default function Purchases() {
       return d >= monday && d <= sunday ? acc + p.amount : acc;
     }, 0);
   }, [supPayments]);
-
-  // Gastos extras — filtrados a la semana actual
-  const filteredExpenses = useMemo(() => {
-    return expenses.filter((e) => {
-      const d = new Date(e.expense_date + 'T12:00:00');
-      const matchesSearch = !search ||
-        e.description.toLowerCase().includes(search.toLowerCase()) ||
-        e.category.toLowerCase().includes(search.toLowerCase());
-      return d >= weekStart && d <= weekEnd && matchesSearch;
-    });
-  }, [expenses, weekStart, weekEnd, search]);
-
-  const totalExpensesThisWeek = useMemo(
-    () => filteredExpenses.reduce((acc, e) => acc + e.amount, 0),
-    [filteredExpenses],
-  );
-
-  const expenseCombinedTotal = useMemo(() => {
-    const e = Number(expenseForm.efectivo) || 0;
-    const b = Number(expenseForm.banco) || 0;
-    return e + b;
-  }, [expenseForm.efectivo, expenseForm.banco]);
-
-  const openCreateExpense = () => {
-    setEditingExpense(null);
-    setExpenseForm(emptyExpenseForm());
-    setExpenseOpen(true);
-  };
-
-  const openEditExpense = (exp: BusinessExpense) => {
-    setEditingExpense(exp);
-    const isCombinado = exp.payment_method === 'combinado';
-    setExpenseForm({
-      description: exp.description,
-      category: exp.category,
-      amount: String(exp.amount),
-      method: exp.payment_method,
-      efectivo: isCombinado ? '' : exp.payment_method === 'efectivo' ? String(exp.amount) : '0',
-      banco: isCombinado ? '' : exp.payment_method === 'banco' ? String(exp.amount) : '0',
-      expense_date: exp.expense_date,
-      reference: exp.reference ?? '',
-      notes: exp.notes ?? '',
-    });
-    setExpenseOpen(true);
-  };
-
-  const saveExpense = async () => {
-    if (!expenseForm.description.trim()) {
-      push('error', 'Escribe una descripción del gasto');
-      return;
-    }
-    const rows: Array<{ description: string; category: string; amount: number; payment_method: string; expense_date: string; reference: string | null; notes: string | null; created_by: string | null }> = [];
-    const base = {
-      description: expenseForm.description.trim(),
-      category: expenseForm.category,
-      expense_date: expenseForm.expense_date,
-      reference: expenseForm.reference.trim() || null,
-      notes: expenseForm.notes.trim() || null,
-      created_by: currentUser?.name ?? null,
-    };
-
-    if (expenseForm.method === 'combinado') {
-      const e = Number(expenseForm.efectivo) || 0;
-      const b = Number(expenseForm.banco) || 0;
-      if (e <= 0 && b <= 0) { push('error', 'Ingresa al menos un monto'); return; }
-      if (e > 0) rows.push({ ...base, amount: e, payment_method: 'efectivo' });
-      if (b > 0) rows.push({ ...base, amount: b, payment_method: 'banco' });
-    } else {
-      const amount = Number(expenseForm.amount);
-      if (!amount || amount <= 0) { push('error', 'El monto debe ser mayor a cero'); return; }
-      rows.push({ ...base, amount, payment_method: expenseForm.method });
-    }
-
-    setSavingExpense(true);
-    if (editingExpense) {
-      // For simplicity: update the single row (combined edits replace with the first row's data)
-      const { error } = await supabase.from('business_expenses').update({
-        ...base,
-        amount: rows[0].amount,
-        payment_method: rows[0].payment_method,
-      }).eq('id', editingExpense.id);
-      if (error) { push('error', 'No se pudo actualizar el gasto'); setSavingExpense(false); return; }
-      push('success', 'Gasto actualizado');
-    } else {
-      const { error } = await supabase.from('business_expenses').insert(rows);
-      if (error) { push('error', 'No se pudo registrar el gasto'); setSavingExpense(false); return; }
-      push('success', rows.length > 1 ? 'Gasto combinado registrado' : 'Gasto registrado');
-    }
-    setExpenseOpen(false);
-    await load();
-    setSavingExpense(false);
-  };
-
-  const confirmDeleteExpense = async () => {
-    if (!deleteExpense) return;
-    const { error } = await supabase.from('business_expenses').delete().eq('id', deleteExpense.id);
-    if (error) push('error', 'No se pudo eliminar el gasto');
-    else { push('success', 'Gasto eliminado'); await load(); }
-    setDeleteExpense(null);
-  };
 
   const openCreate = () => {
     setEditing(null);
@@ -541,17 +379,6 @@ export default function Purchases() {
         setSaving(false);
         return;
       }
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const before = p ? p.stock : 0;
-          return {
-            product_id: it.product_id, product_name: p?.name ?? '', product_sku: p?.sku ?? '',
-            action: 'purchase', stock_before: before, stock_after: before + Number(it.quantity),
-            changed_by: currentUser?.name ?? null, notes: `Compra editada ${form.invoice_number}`,
-          };
-        }),
-      );
       const payRows = buildPayments(editing.id);
       if (payRows.length > 0) {
         const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
@@ -578,17 +405,6 @@ export default function Purchases() {
         setSaving(false);
         return;
       }
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const before = p ? p.stock : 0;
-          return {
-            product_id: it.product_id, product_name: p?.name ?? '', product_sku: p?.sku ?? '',
-            action: 'purchase', stock_before: before, stock_after: before + Number(it.quantity),
-            changed_by: currentUser?.name ?? null, notes: `Compra ${form.invoice_number}`,
-          };
-        }),
-      );
       const payRows = buildPayments(created.id);
       if (payRows.length > 0) {
         const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
@@ -722,7 +538,7 @@ export default function Purchases() {
             canCreate && <button className="btn-primary" onClick={openCreate} disabled={suppliers.length === 0 || products.length === 0}>
               <Plus size={16} /> Nueva compra
             </button>
-          ) : tab === 'pagos' ? (
+          ) : (
             <button
               className="btn-primary"
               onClick={() => {
@@ -733,10 +549,6 @@ export default function Purchases() {
               disabled={suppliers.length === 0}
             >
               <Plus size={16} /> Nuevo pago
-            </button>
-          ) : (
-            <button className="btn-primary" onClick={openCreateExpense}>
-              <Plus size={16} /> Nuevo gasto
             </button>
           )
         }
@@ -789,17 +601,6 @@ export default function Purchases() {
             </div>
           </div>
         </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-danger-50 text-danger-600">
-              <FileText size={20} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalExpensesThisWeek)}</p>
-              <p className="text-sm text-ink-500">Gastos extras semana</p>
-            </div>
-          </div>
-        </div>
       </div>
 
       {(suppliers.length === 0 || products.length === 0) && !loading && tab === 'compras' && (
@@ -840,19 +641,6 @@ export default function Purchases() {
             {filteredSupPayments.length}
           </span>
         </button>
-        <button
-          onClick={() => { setTab('gastos'); setSearch(''); }}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
-            tab === 'gastos'
-              ? 'border-brand-600 text-brand-700'
-              : 'border-transparent text-ink-500 hover:text-ink-700'
-          }`}
-        >
-          <FileText size={16} /> Gastos extras
-          <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
-            {filteredExpenses.length}
-          </span>
-        </button>
       </div>
 
       <div className="card p-4 mb-4">
@@ -861,11 +649,7 @@ export default function Purchases() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
             <input
               className="input pl-9"
-              placeholder={
-                tab === 'compras' ? 'Buscar por folio o proveedor…' :
-                tab === 'gastos' ? 'Buscar por descripción o categoría…' :
-                'Buscar por proveedor o referencia…'
-              }
+              placeholder={tab === 'compras' ? 'Buscar por folio o proveedor…' : 'Buscar por proveedor o referencia…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -1041,85 +825,6 @@ export default function Purchases() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      ) : (
-        /* ── Pestaña: Gastos extras ── */
-        <div className="card overflow-hidden">
-          {loading ? (
-            <FullPageLoader />
-          ) : filteredExpenses.length === 0 ? (
-            <EmptyState
-              icon={FileText}
-              title="Sin gastos registrados esta semana"
-              description="Registra gastos operativos del negocio como renta, servicios, gasolina, etc."
-              action={
-                <button className="btn-primary" onClick={openCreateExpense}>
-                  <Plus size={16} /> Nuevo gasto
-                </button>
-              }
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-ink-100">
-                <thead className="bg-ink-50/60">
-                  <tr>
-                    <th className="table-head">Fecha</th>
-                    <th className="table-head">Descripción</th>
-                    <th className="table-head">Categoría</th>
-                    <th className="table-head">Método</th>
-                    <th className="table-head">Referencia</th>
-                    <th className="table-head text-right">Monto</th>
-                    <th className="table-head text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  {filteredExpenses.map((e) => (
-                    <tr key={e.id} className="hover:bg-ink-50/60 transition">
-                      <td className="table-cell">{formatDate(e.expense_date)}</td>
-                      <td className="table-cell font-semibold text-ink-900">{e.description}</td>
-                      <td className="table-cell">
-                        <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">{e.category}</span>
-                      </td>
-                      <td className="table-cell capitalize">
-                        <Badge variant={e.payment_method === 'efectivo' ? 'success' : e.payment_method === 'banco' ? 'brand' : 'accent'}>
-                          {e.payment_method === 'efectivo' ? 'Efectivo' : e.payment_method === 'banco' ? 'Banco' : e.payment_method}
-                        </Badge>
-                      </td>
-                      <td className="table-cell text-ink-500">{e.reference ?? '—'}</td>
-                      <td className="table-cell text-right font-semibold text-danger-600">
-                        {formatCurrency(e.amount)}
-                      </td>
-                      <td className="table-cell text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => openEditExpense(e)}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                            aria-label="Editar"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteExpense(e)}
-                            className="rounded-lg p-1.5 text-ink-500 hover:bg-danger-50 hover:text-danger-600 transition"
-                            aria-label="Eliminar"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-ink-50">
-                    <td colSpan={5} className="table-cell text-right font-semibold text-ink-700">Total semana</td>
-                    <td className="table-cell text-right font-bold text-danger-600">{formatCurrency(totalExpensesThisWeek)}</td>
-                    <td />
-                  </tr>
-                </tfoot>
               </table>
             </div>
           )}
@@ -1680,170 +1385,9 @@ export default function Purchases() {
         onConfirm={confirmDeleteSupPay}
         onCancel={() => setDeleteSupPay(null)}
       />
-
-      {/* ── Modal: Nuevo / Editar gasto extra ─────────────────────────────── */}
-      <Modal
-        open={expenseOpen}
-        onClose={() => setExpenseOpen(false)}
-        title={editingExpense ? 'Editar gasto' : 'Registrar gasto extra'}
-        description="Gastos operativos que no corresponden a compras de inventario"
-        size="lg"
-        footer={
-          <>
-            <button className="btn-secondary" onClick={() => setExpenseOpen(false)} disabled={savingExpense}>
-              Cancelar
-            </button>
-            <button className="btn-primary" onClick={saveExpense} disabled={savingExpense}>
-              {savingExpense ? 'Guardando…' : 'Guardar gasto'}
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2">
-              <label className="label">Descripción *</label>
-              <input
-                className="input"
-                value={expenseForm.description}
-                onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
-                placeholder="Ej. Pago de renta del local, gasolina del reparto…"
-              />
-            </div>
-            <div>
-              <label className="label">Categoría</label>
-              <select
-                className="input"
-                value={expenseForm.category}
-                onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
-              >
-                {EXPENSE_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Fecha</label>
-              <input
-                className="input"
-                type="date"
-                value={expenseForm.expense_date}
-                onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="label">Método de pago</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 'efectivo', label: 'Efectivo', icon: Banknote },
-                { value: 'banco',    label: 'Banco',    icon: Building },
-                { value: 'combinado', label: 'Combinado', icon: Layers },
-              ].map((m) => {
-                const Icon = m.icon;
-                const active = expenseForm.method === m.value;
-                return (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => setExpenseForm({ ...expenseForm, method: m.value })}
-                    className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
-                      active
-                        ? 'border-brand-500 bg-brand-50 text-brand-700'
-                        : 'border-ink-200 bg-white text-ink-600 hover:bg-ink-50'
-                    }`}
-                  >
-                    <Icon size={16} />
-                    {m.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {expenseForm.method === 'combinado' ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label flex items-center gap-1.5"><Banknote size={12} /> Efectivo</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={expenseForm.efectivo}
-                    onChange={(e) => setExpenseForm({ ...expenseForm, efectivo: e.target.value })}
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="label flex items-center gap-1.5"><Building size={12} /> Banco</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={expenseForm.banco}
-                    onChange={(e) => setExpenseForm({ ...expenseForm, banco: e.target.value })}
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-between rounded-lg bg-ink-50 p-3 text-sm">
-                <span className="text-ink-500">Total combinado</span>
-                <span className="font-bold text-ink-900">{formatCurrency(expenseCombinedTotal)}</span>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <label className="label">Monto *</label>
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                min="0"
-                value={expenseForm.amount}
-                onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
-                placeholder="0.00"
-              />
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Referencia</label>
-              <input
-                className="input"
-                value={expenseForm.reference}
-                onChange={(e) => setExpenseForm({ ...expenseForm, reference: e.target.value })}
-                placeholder="Recibo, folio de transferencia, etc."
-              />
-            </div>
-            <div>
-              <label className="label">Notas</label>
-              <input
-                className="input"
-                value={expenseForm.notes}
-                onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
-                placeholder="Notas internas"
-              />
-            </div>
-          </div>
-        </div>
-      </Modal>
-
-      <ConfirmDialog
-        open={!!deleteExpense}
-        title="Eliminar gasto"
-        message="¿Eliminar este gasto? Esta acción no se puede deshacer."
-        onConfirm={confirmDeleteExpense}
-        onCancel={() => setDeleteExpense(null)}
-      />
     </div>
   );
 }
-
 
 
 

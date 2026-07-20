@@ -59,7 +59,7 @@ function getWeekRange(): { monday: Date; sunday: Date } {
 }
 
 export default function Sales() {
-  const { can, currentUser } = useAuth();
+  const { can } = useAuth();
   const canCreate = can('sales:create');
   const canEdit   = can('sales:edit');
   const canDelete = can('sales:delete');
@@ -90,7 +90,7 @@ export default function Sales() {
   const load = async () => {
     setLoading(true);
     const [sRes, cRes, prodRes] = await Promise.all([
-      supabase.from('sales').select('*, customer:customers(*)').neq('delivery_status', 'entregado').order('sale_date', { ascending: false }),
+      supabase.from('sales').select('*, customer:customers(*)').order('sale_date', { ascending: false }),
       supabase.from('customers').select('*').order('name'),
       supabase.from('products').select('*').order('name'),
     ]);
@@ -235,17 +235,6 @@ export default function Sales() {
         setSaving(false);
         return;
       }
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const before = p ? p.stock : 0;
-          return {
-            product_id: it.product_id, product_name: p?.name ?? '', product_sku: p?.sku ?? '',
-            action: 'sale', stock_before: before, stock_after: before - Number(it.quantity),
-            changed_by: currentUser?.name ?? null, notes: `Venta editada ${form.invoice_number}`,
-          };
-        }),
-      );
       push('success', 'Venta actualizada');
       setModalOpen(false);
       load();
@@ -270,17 +259,6 @@ export default function Sales() {
         setSaving(false);
         return;
       }
-      await supabase.from('inventory_logs').insert(
-        validItems.map((it) => {
-          const p = products.find((pr) => pr.id === it.product_id);
-          const before = p ? p.stock : 0;
-          return {
-            product_id: it.product_id, product_name: p?.name ?? '', product_sku: p?.sku ?? '',
-            action: 'sale', stock_before: before, stock_after: before - Number(it.quantity),
-            changed_by: currentUser?.name ?? null, notes: `Venta ${form.invoice_number}`,
-          };
-        }),
-      );
       push('success', 'Venta registrada');
       setModalOpen(false);
       setSaving(false);
