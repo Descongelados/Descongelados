@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart2,
   TrendingUp,
@@ -319,11 +319,8 @@ export default function Reports() {
       .reduce((s, p) => s + p.amount, 0);
     const totalPaid = supplierPayments.reduce((s, p) => s + p.amount, 0);
 
-    // Ganancia real: Σ (precio_venta − costo_compra) × cantidad  por cada línea vendida
-    const ganancia = saleItems.reduce((acc, it) => {
-      const costPrice = it.product?.cost_price ?? 0;
-      return acc + (it.unit_price - costPrice) * it.quantity;
-    }, 0);
+    // Ganancia = ventas cobradas − gastos pagados (consistente con los desgloses)
+    const ganancia = totalCollected - totalPaid;
     const gananciaEfectivo = colEfectivo - spEfectivo;
     const gananciaBanco = colBanco - spBanco;
 
