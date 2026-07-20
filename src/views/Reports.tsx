@@ -259,13 +259,11 @@ export default function Reports() {
       .reduce((s, p) => s + p.amount, 0);
     const totalPaid = supplierPayments.reduce((s, p) => s + p.amount, 0);
 
-    // Ganancia real: Σ (precio_venta − costo_compra) × cantidad  por cada línea vendida
-    const ganancia = saleItems.reduce((acc, it) => {
-      const costPrice = it.product?.cost_price ?? 0;
-      return acc + (it.unit_price - costPrice) * it.quantity;
-    }, 0);
+    // Ganancia por método de pago: cobrado − pagado a proveedor en cada canal
     const gananciaEfectivo = colEfectivo - spEfectivo;
     const gananciaBanco = colBanco - spBanco;
+    // Ganancia neta total = suma de ambos canales (consistente con los subtotales)
+    const ganancia = gananciaEfectivo + gananciaBanco;
 
     // products sold
     const productMap = new Map<string, { name: string; qty: number; total: number }>();
@@ -583,4 +581,3 @@ export default function Reports() {
     </div>
   );
 }
-
