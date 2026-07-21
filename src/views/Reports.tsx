@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart2,
   TrendingUp,
@@ -319,11 +319,13 @@ export default function Reports() {
       .reduce((s, p) => s + p.amount, 0);
     const totalPaid = supplierPayments.reduce((s, p) => s + p.amount, 0);
 
-    // Ganancia neta = Σ (precio_venta − costo_compra) × cantidad por línea vendida
+    // Ganancia real: Σ (precio_venta − costo_compra) × cantidad  por cada línea vendida
     const ganancia = saleItems.reduce((acc, it) => {
       const costPrice = it.product?.cost_price ?? 0;
       return acc + (it.unit_price - costPrice) * it.quantity;
     }, 0);
+    const gananciaEfectivo = colEfectivo - spEfectivo;
+    const gananciaBanco = colBanco - spBanco;
 
     // products sold
     const productMap = new Map<string, { name: string; qty: number; total: number }>();
@@ -351,6 +353,8 @@ export default function Reports() {
       spEfectivo,
       spBanco,
       ganancia,
+      gananciaEfectivo,
+      gananciaBanco,
       topProducts,
     };
   }, [reportData]);
@@ -527,7 +531,7 @@ export default function Reports() {
               </div>
 
               {/* Ganancia */}
-              <div className="card p-5">
+              <div className="card p-5 space-y-3">
                 <div className="flex items-center gap-2">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${metrics.ganancia >= 0 ? 'bg-brand-50 text-brand-600' : 'bg-danger-50 text-danger-600'}`}>
                     {metrics.ganancia >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
@@ -539,9 +543,20 @@ export default function Reports() {
                     </p>
                   </div>
                 </div>
-                <p className="mt-3 text-xs text-ink-400 border-t border-ink-100 pt-2">
-                  Margen por producto · (precio venta − costo) × cantidad
-                </p>
+                <div className="space-y-1 border-t border-ink-100 pt-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Banknote size={13} /> Efectivo</span>
+                    <span className={`font-semibold ${metrics.gananciaEfectivo >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                      {formatCurrency(metrics.gananciaEfectivo)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco</span>
+                    <span className={`font-semibold ${metrics.gananciaBanco >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                      {formatCurrency(metrics.gananciaBanco)}
+                    </span>
+                  </div>
+                </div>
               </div>
 
             </div>
