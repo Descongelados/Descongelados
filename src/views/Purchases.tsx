@@ -189,18 +189,31 @@ export default function Purchases() {
 
   const load = async () => {
     setLoading(true);
+    const { monday, sunday } = getWeekRange();
+    const mondayStr = monday.toISOString().slice(0, 10);
+    const sundayStr = `${sunday.toISOString().slice(0, 10)}T23:59:59`;
+
     const [pRes, sRes, prodRes, supPaysRes, expRes] = await Promise.all([
       supabase
         .from('purchases')
         .select('id, invoice_number, purchase_date, total, subtotal, tax, status, supplier_id, notes, created_at, supplier:suppliers(id, name)')
+        .gte('purchase_date', mondayStr)
+        .lte('purchase_date', sundayStr)
         .order('purchase_date', { ascending: false }),
       supabase.from('suppliers').select('id, name, phone, tax_id, email, city, contact, created_at').order('name'),
       supabase.from('products').select('id, sku, name, cost_price, sale_price, stock, unit, is_active').order('name'),
       supabase
         .from('supplier_payments')
         .select('id, purchase_id, supplier_id, amount, payment_method, payment_date, reference, notes, created_at, supplier:suppliers(id, name), purchase:purchases(id, invoice_number, total)')
+        .gte('payment_date', mondayStr)
+        .lte('payment_date', sundayStr)
         .order('payment_date', { ascending: false }),
-      supabase.from('business_expenses').select('*').order('expense_date', { ascending: false }),
+      supabase
+        .from('business_expenses')
+        .select('*')
+        .gte('expense_date', mondayStr)
+        .lte('expense_date', sundayStr)
+        .order('expense_date', { ascending: false }),
     ]);
     if (pRes.error) {
       push('error', 'No se pudieron cargar las compras');
@@ -230,44 +243,39 @@ export default function Purchases() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { monday: weekStart, sunday: weekEnd } = useMemo(() => getWeekRange(), []);
-
   const filtered = useMemo(() => {
     if (!purchases) return [];
-    return purchases.filter((p) => {
-      const d = new Date(p.purchase_date);
-      const inWeek = d >= weekStart && d <= weekEnd;
-      const matchesSearch =
-        !search ||
-        p.invoice_number?.toLowerCase().includes(search.toLowerCase()) ||
-        p.supplier?.name.toLowerCase().includes(search.toLowerCase());
-      return inWeek && matchesSearch;
-    });
-  }, [purchases, search, weekStart, weekEnd]);
+    if (!search) return purchases;
+    const q = search.toLowerCase();
+    return purchases.filter(
+      (p) =>
+        p.invoice_number?.toLowerCase().includes(q) ||
+        p.supplier?.name.toLowerCase().includes(q),
+    );
+  }, [purchases, search]);
 
   const filteredSupPayments = useMemo(() => {
     if (!supPayments) return [];
+    const q = search.toLowerCase();
     return supPayments.filter((p) => {
-      const d = new Date(p.payment_date);
-      const inWeek = d >= weekStart && d <= weekEnd;
       const matchesSearch =
         !search ||
-        p.supplier?.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.reference?.toLowerCase().includes(search.toLowerCase());
+        p.supplier?.name.toLowerCase().includes(q) ||
+        p.reference?.toLowerCase().includes(q);
       const matchesMethod = methodFilter === 'all' || p.payment_method === methodFilter;
-      return inWeek && matchesSearch && matchesMethod;
+      return matchesSearch && matchesMethod;
     });
-  }, [supPayments, search, methodFilter, weekStart, weekEnd]);
+  }, [supPayments, search, methodFilter]);
 
   const filteredExpenses = useMemo(() => {
-    return expenses.filter((e) => {
-      const d = new Date(e.expense_date + 'T12:00:00');
-      const matchesSearch = !search ||
-        e.description.toLowerCase().includes(search.toLowerCase()) ||
-        e.category.toLowerCase().includes(search.toLowerCase());
-      return d >= weekStart && d <= weekEnd && matchesSearch;
-    });
-  }, [expenses, weekStart, weekEnd, search]);
+    if (!search) return expenses;
+    const q = search.toLowerCase();
+    return expenses.filter(
+      (e) =>
+        e.description.toLowerCase().includes(q) ||
+        e.category.toLowerCase().includes(q),
+    );
+  }, [expenses, search]);
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
@@ -331,21 +339,10 @@ export default function Purchases() {
     [purchases, paidByPurchase],
   );
 
-  const totalPaidThisWeek = useMemo(() => {
-    const now = new Date();
-    const day = now.getDay();
-    const diffToMonday = (day === 0 ? -6 : 1 - day);
-    const monday = new Date(now);
-    monday.setDate(now.getDate() + diffToMonday);
-    monday.setHours(0, 0, 0, 0);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    sunday.setHours(23, 59, 59, 999);
-    return (supPayments ?? []).reduce((acc, p) => {
-      const d = new Date(p.payment_date);
-      return d >= monday && d <= sunday ? acc + p.amount : acc;
-    }, 0);
-  }, [supPayments]);
+  const totalPaidThisWeek = useMemo(
+    () => (supPayments ?? []).reduce((acc, p) => acc + p.amount, 0),
+    [supPayments],
+  );
 
   const openCreate = () => {
     setEditing(null);

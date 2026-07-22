@@ -89,10 +89,16 @@ export default function Sales() {
 
   const load = async () => {
     setLoading(true);
+    const { monday, sunday } = getWeekRange();
+    const mondayStr = monday.toISOString().slice(0, 10);
+    const sundayStr = `${sunday.toISOString().slice(0, 10)}T23:59:59`;
+
     const [sRes, cRes, prodRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
+        .gte('sale_date', mondayStr)
+        .lte('sale_date', sundayStr)
         .order('sale_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
       supabase.from('products').select('id, sku, name, sale_price, cost_price, stock, unit, is_active').order('name'),
@@ -113,20 +119,16 @@ export default function Sales() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { monday: weekStart, sunday: weekEnd } = useMemo(() => getWeekRange(), []);
-
   const filtered = useMemo(() => {
     if (!sales) return [];
-    return sales.filter((s) => {
-      const d = new Date(s.sale_date);
-      const inWeek = d >= weekStart && d <= weekEnd;
-      const matchesSearch =
-        !search ||
-        s.invoice_number?.toLowerCase().includes(search.toLowerCase()) ||
-        s.customer?.name.toLowerCase().includes(search.toLowerCase());
-      return inWeek && matchesSearch;
-    });
-  }, [sales, search, weekStart, weekEnd]);
+    if (!search) return sales;
+    const q = search.toLowerCase();
+    return sales.filter(
+      (s) =>
+        s.invoice_number?.toLowerCase().includes(q) ||
+        s.customer?.name.toLowerCase().includes(q),
+    );
+  }, [sales, search]);
 
   const totalCollectedThisWeek = useMemo(
     () => filtered.reduce((acc, s) => acc + s.total, 0),
