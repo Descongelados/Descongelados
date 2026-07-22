@@ -468,17 +468,15 @@ export default function Inventory() {
   }, [products, search, categoryFilter, stockFilter]);
 
   const generateNextSku = async (): Promise<string> => {
-    const { data } = await supabase.from('products').select('sku');
-    const skus = (data ?? []) as Pick<Product, 'sku'>[];
-    let maxNum = 0;
-    skus.forEach((s) => {
-      const match = s.sku.match(/PROD-(\d+)/i);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (num > maxNum) maxNum = num;
-      }
-    });
-    return `PROD-${String(maxNum + 1).padStart(4, '0')}`;
+    const { data } = await supabase
+      .from('products')
+      .select('sku')
+      .ilike('sku', 'PROD-%')
+      .order('sku', { ascending: false })
+      .limit(1);
+    const lastSku = data?.[0]?.sku ?? 'PROD-0000';
+    const num = parseInt(lastSku.replace(/PROD-/i, ''), 10) || 0;
+    return `PROD-${String(num + 1).padStart(4, '0')}`;
   };
 
   const openCreate = async () => {
