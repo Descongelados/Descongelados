@@ -189,14 +189,16 @@ export default function Purchases() {
 
   const load = async () => {
     setLoading(true);
-    const [pRes, sRes, prodRes, paysRes, supPaysRes, expRes] = await Promise.all([
-      supabase.from('purchases').select('*, supplier:suppliers(*)').order('purchase_date', { ascending: false }),
-      supabase.from('suppliers').select('*').order('name'),
-      supabase.from('products').select('*').order('name'),
-      supabase.from('supplier_payments').select('purchase_id, amount, payment_method'),
+    const [pRes, sRes, prodRes, supPaysRes, expRes] = await Promise.all([
+      supabase
+        .from('purchases')
+        .select('id, invoice_number, purchase_date, total, subtotal, tax, status, supplier_id, notes, created_at, supplier:suppliers(id, name)')
+        .order('purchase_date', { ascending: false }),
+      supabase.from('suppliers').select('id, name, phone, tax_id, email, city, contact, created_at').order('name'),
+      supabase.from('products').select('id, sku, name, cost_price, sale_price, stock, unit, is_active').order('name'),
       supabase
         .from('supplier_payments')
-        .select('*, supplier:suppliers(*), purchase:purchases(*)')
+        .select('id, purchase_id, supplier_id, amount, payment_method, payment_date, reference, notes, created_at, supplier:suppliers(id, name), purchase:purchases(id, invoice_number, total)')
         .order('payment_date', { ascending: false }),
       supabase.from('business_expenses').select('*').order('expense_date', { ascending: false }),
     ]);
@@ -208,8 +210,17 @@ export default function Purchases() {
     }
     if (!sRes.error) setSuppliers(sRes.data as Supplier[]);
     if (!prodRes.error) setProducts(prodRes.data as Product[]);
-    setPaymentByPurchase((paysRes.data ?? []) as Array<{ purchase_id: string; amount: number; payment_method: string }>);
-    if (!supPaysRes.error) setSupPayments(supPaysRes.data as PaymentRow[]);
+    if (!supPaysRes.error) {
+      const pays = supPaysRes.data as PaymentRow[];
+      setSupPayments(pays);
+      setPaymentByPurchase(
+        pays.map((p) => ({
+          purchase_id: p.purchase_id ?? '',
+          amount: p.amount,
+          payment_method: p.payment_method,
+        }))
+      );
+    }
     if (!expRes.error) setExpenses((expRes.data ?? []) as BusinessExpense[]);
     setLoading(false);
   };

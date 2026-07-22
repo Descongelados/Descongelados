@@ -90,9 +90,12 @@ export default function Sales() {
   const load = async () => {
     setLoading(true);
     const [sRes, cRes, prodRes] = await Promise.all([
-      supabase.from('sales').select('*, customer:customers(*)').order('sale_date', { ascending: false }),
-      supabase.from('customers').select('*').order('name'),
-      supabase.from('products').select('*').order('name'),
+      supabase
+        .from('sales')
+        .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
+        .order('sale_date', { ascending: false }),
+      supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
+      supabase.from('products').select('id, sku, name, sale_price, cost_price, stock, unit, is_active').order('name'),
     ]);
     if (sRes.error) {
       push('error', 'No se pudieron cargar las ventas');

@@ -123,14 +123,14 @@ export default function Collections({ onDataChanged }: Props) {
     const [sRes, cRes, custRes] = await Promise.all([
       supabase
         .from('sales')
-        .select('*, customer:customers(*)')
+        .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
         .eq('status', 'confirmada')
         .order('sale_date', { ascending: false }),
       supabase
         .from('collections')
-        .select('*, customer:customers(*), sale:sales(*)')
+        .select('id, sale_id, customer_id, amount, payment_method, collection_date, reference, notes, created_at, customer:customers(id, name), sale:sales(id, invoice_number, total)')
         .order('collection_date', { ascending: false }),
-      supabase.from('customers').select('*').order('name'),
+      supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
     ]);
     if (sRes.error) {
       push('error', 'No se pudieron cargar las ventas');
