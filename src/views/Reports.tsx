@@ -254,24 +254,26 @@ export default function Reports() {
         .lte('payment_date', end),
     ]);
 
-    // Fetch sale_items scoped to the sales in range — include sale_date via join
+    // Fetch sale_items scoped to the sales in range — sale_date via JOIN a sales
     let saleItems: SaleItemRow[] = [];
     if (!salesRes.error && salesRes.data && salesRes.data.length > 0) {
       const saleIds = salesRes.data.map((s) => s.id);
-      // Build a lookup: sale_id → sale_date
-      const saleDateMap = new Map<string, string>(
-        salesRes.data.map((s) => [s.id, s.sale_date as string])
-      );
       const { data: itemData } = await supabase
         .from('sale_items')
-        .select('quantity, unit_price, subtotal, sale_id, product:products(name, cost_price)')
+        .select('quantity, unit_price, subtotal, product:products(name, cost_price), sale:sales(sale_date)')
         .in('sale_id', saleIds);
 
-      saleItems = ((itemData ?? []) as unknown as (SaleItemRow & { sale_id: string })[]).map((it) => ({
+      saleItems = ((itemData ?? []) as unknown as {
+        quantity: number;
+        unit_price: number;
+        subtotal: number;
+        product: { name: string; cost_price: number } | null;
+        sale: { sale_date: string } | null;
+      }[]).map((it) => ({
         quantity: it.quantity,
         unit_price: it.unit_price,
         subtotal: it.subtotal,
-        sale_date: saleDateMap.get((it as unknown as { sale_id: string }).sale_id) ?? from,
+        sale_date: it.sale?.sale_date ?? from,
         product: it.product,
       }));
     }
