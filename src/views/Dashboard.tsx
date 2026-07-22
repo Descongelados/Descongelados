@@ -129,17 +129,23 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .lte('sale_date', `${sunday}T23:59:59`)
           .order('sale_date', { ascending: false })
           .limit(10),
-        // Ventas entregadas (sin filtro de semana) para calcular saldo real por cobrar
-        supabase
-          .from('sales')
-          .select('id, total')
-          .eq('status', 'confirmada')
-          .eq('delivery_status', 'entregado'),
-        // Todos los cobros (sin filtro de semana) para calcular saldo real por cobrar
+        // Ventas entregadas de esta semana para calcular saldo por cobrar
+        applyWeek(
+          supabase
+            .from('sales')
+            .select('id, total')
+            .eq('status', 'confirmada')
+            .eq('delivery_status', 'entregado'),
+          'sale_date'
+        ),
+        // Cobros de ventas de esta semana para calcular saldo por cobrar
         supabase.from('collections').select('sale_id, amount'),
-        // Todas las compras confirmadas (sin filtro) para calcular saldo real por pagar
-        supabase.from('purchases').select('id, total').eq('status', 'confirmada'),
-        // Todos los pagos a proveedores (sin filtro) para calcular saldo real por pagar
+        // Compras de esta semana para calcular saldo por pagar
+        applyWeek(
+          supabase.from('purchases').select('id, total').eq('status', 'confirmada'),
+          'purchase_date'
+        ),
+        // Pagos a proveedores (todos) para calcular saldo por pagar
         supabase.from('supplier_payments').select('purchase_id, amount'),
       ]);
 
@@ -252,14 +258,14 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               value={formatCurrency(data.totalToCollect)}
               icon={Wallet}
               tone="accent"
-              hint="Saldo pendiente clientes · ventas entregadas"
+              hint="Saldo pendiente clientes · esta semana"
             />
             <StatCard
               label="Por pagar"
               value={formatCurrency(data.totalToPay)}
               icon={DollarSign}
               tone="warning"
-              hint="Saldo pendiente proveedores · total histórico"
+              hint="Saldo pendiente proveedores · esta semana"
             />
           </div>
 
