@@ -34,18 +34,6 @@ type ItemRow = {
 
 const TAX_RATE = 0.16;
 
-const generateInvoiceNumber = (existing: SaleRow[]): string => {
-  const year = new Date().getFullYear();
-  const prefix = `VTA-${year}-`;
-  const maxNum = existing
-    .map((s) => {
-      const m = (s.invoice_number ?? '').match(/VTA-\d{4}-(\d+)/);
-      return m ? Number(m[1]) : 0;
-    })
-    .reduce((a, b) => Math.max(a, b), 0);
-  return `${prefix}${String(maxNum + 1).padStart(4, '0')}`;
-};
-
 function getWeekRange(): { monday: Date; sunday: Date } {
   const now = new Date();
   const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
@@ -141,11 +129,11 @@ export default function Sales() {
     return { subtotal, tax, total: subtotal + tax };
   }, [items, form.has_tax]);
 
-  const openCreate = () => {
+  const openCreate = async () => {
     setEditing(null);
     setForm({
       customer_id: customers[0]?.id ?? '',
-      invoice_number: generateInvoiceNumber(sales ?? []),
+      invoice_number: '',
       sale_date: toDateInputValue(new Date()),
       notes: '',
       status: 'confirmada',
@@ -153,6 +141,9 @@ export default function Sales() {
     });
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
     setModalOpen(true);
+    // Genera el folio consultando el máximo histórico en la BD
+    const { data } = await supabase.rpc('next_invoice_number');
+    if (data) setForm((prev) => ({ ...prev, invoice_number: data as string }));
   };
 
   const openEdit = async (s: SaleRow) => {
