@@ -112,6 +112,10 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         supplierPaymentsRes,
         lowStockRes,
         recentSalesRes,
+        allDeliveredSalesRes,
+        allCollectionsRes,
+        allPurchasesRes,
+        allSupPaymentsRes,
       ] = await Promise.all([
         applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
@@ -125,6 +129,18 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .lte('sale_date', `${sunday}T23:59:59`)
           .order('sale_date', { ascending: false })
           .limit(10),
+        // Ventas entregadas (sin filtro de semana) para calcular saldo real por cobrar
+        supabase
+          .from('sales')
+          .select('id, total')
+          .eq('status', 'confirmada')
+          .eq('delivery_status', 'entregado'),
+        // Todos los cobros (sin filtro de semana) para calcular saldo real por cobrar
+        supabase.from('collections').select('sale_id, amount'),
+        // Todas las compras confirmadas (sin filtro) para calcular saldo real por pagar
+        supabase.from('purchases').select('id, total').eq('status', 'confirmada'),
+        // Todos los pagos a proveedores (sin filtro) para calcular saldo real por pagar
+        supabase.from('supplier_payments').select('purchase_id, amount'),
       ]);
 
       if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
@@ -157,12 +173,34 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const lowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
       const actualLowStock = lowStock.filter((p) => p.stock <= p.min_stock);
 
+      // Saldo real por cobrar: suma de (total - cobrado) de ventas entregadas con saldo > 0
+      const deliveredSales = (allDeliveredSalesRes.data ?? []) as Array<{ id: string; total: number }>;
+      const colBySale = new Map<string, number>();
+      for (const c of (allCollectionsRes.data ?? []) as Array<{ sale_id: string | null; amount: number }>) {
+        if (c.sale_id) colBySale.set(c.sale_id, (colBySale.get(c.sale_id) ?? 0) + c.amount);
+      }
+      const totalToCollect = deliveredSales.reduce((acc, s) => {
+        const balance = s.total - (colBySale.get(s.id) ?? 0);
+        return acc + Math.max(0, balance);
+      }, 0);
+
+      // Saldo real por pagar: suma de (total - pagado) de compras con saldo > 0
+      const allPurchases = (allPurchasesRes.data ?? []) as Array<{ id: string; total: number }>;
+      const payByPurchase = new Map<string, number>();
+      for (const p of (allSupPaymentsRes.data ?? []) as Array<{ purchase_id: string | null; amount: number }>) {
+        if (p.purchase_id) payByPurchase.set(p.purchase_id, (payByPurchase.get(p.purchase_id) ?? 0) + p.amount);
+      }
+      const totalToPay = allPurchases.reduce((acc, p) => {
+        const balance = p.total - (payByPurchase.get(p.id) ?? 0);
+        return acc + Math.max(0, balance);
+      }, 0);
+
       setData({
         totalSales,
         totalPurchases,
         totalCollected,
-        totalToCollect: totalSales - totalCollected,
-        totalToPay: totalPurchases - totalPaid,
+        totalToCollect,
+        totalToPay,
         cashSales,
         cashExpenses,
         lowStockCount: actualLowStock.length,
@@ -214,14 +252,14 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               value={formatCurrency(data.totalToCollect)}
               icon={Wallet}
               tone="accent"
-              hint="Saldo pendiente clientes · esta semana"
+              hint="Saldo pendiente clientes · ventas entregadas"
             />
             <StatCard
               label="Por pagar"
               value={formatCurrency(data.totalToPay)}
               icon={DollarSign}
               tone="warning"
-              hint="Saldo pendiente proveedores · esta semana"
+              hint="Saldo pendiente proveedores · total histórico"
             />
           </div>
 
