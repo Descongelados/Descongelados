@@ -243,39 +243,49 @@ const ACTION_COLORS: Record<InventoryLog['action'], string> = {
   sale:     'bg-accent-100 text-accent-700',
 };
 
+const PAGE_SIZE = 100;
+
 function InventoryLogTab() {
-  const [logs, setLogs] = useState<InventoryLog[] | null>(null);
+  const [logs, setLogs] = useState<InventoryLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  // Debounce: espera 350 ms después del último keystroke antes de lanzar la query
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Resetear a página 0 cuando cambian los filtros
+  useEffect(() => { setPage(0); }, [actionFilter, debouncedSearch]);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const { data } = await supabase
+      const from = page * PAGE_SIZE;
+      const to   = from + PAGE_SIZE - 1;
+
+      let q = supabase
         .from('inventory_logs')
-        .select('*')
+        .select('id, product_name, product_sku, action, stock_before, stock_after, delta, changed_by, notes, created_at')
         .order('created_at', { ascending: false })
-        .limit(500);
-      setLogs((data ?? []) as InventoryLog[]);
+        .range(from, to);
+
+      if (actionFilter !== 'all') q = q.eq('action', actionFilter);
+      if (debouncedSearch)        q = q.ilike('product_name', `%${debouncedSearch}%`);
+
+      const { data } = await q;
+      const rows = (data ?? []) as InventoryLog[];
+      setLogs(rows);
+      setHasMore(rows.length === PAGE_SIZE);
       setLoading(false);
     };
     load();
-  }, []);
-
-  const filtered = useMemo(() => {
-    if (!logs) return [];
-    return logs.filter((l) => {
-      const matchesAction = actionFilter === 'all' || l.action === actionFilter;
-      const matchesSearch =
-        !search ||
-        l.product_name.toLowerCase().includes(search.toLowerCase()) ||
-        l.product_sku.toLowerCase().includes(search.toLowerCase());
-      return matchesAction && matchesSearch;
-    });
-  }, [logs, actionFilter, search]);
-
-  if (loading) return <FullPageLoader />;
+  }, [actionFilter, debouncedSearch, page]);
 
   return (
     <div className="space-y-4">
@@ -286,7 +296,7 @@ function InventoryLogTab() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
             <input
               className="input pl-9"
-              placeholder="Buscar por producto o SKU…"
+              placeholder="Buscar por producto…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -308,7 +318,9 @@ function InventoryLogTab() {
 
       {/* Table */}
       <div className="card overflow-hidden">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <FullPageLoader />
+        ) : logs.length === 0 ? (
           <EmptyState
             icon={ClipboardList}
             title="Sin movimientos"
@@ -330,7 +342,7 @@ function InventoryLogTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {filtered.map((l) => {
+                {logs.map((l) => {
                   const delta = l.delta ?? 0;
                   return (
                     <tr key={l.id} className="hover:bg-ink-50/60 transition">
@@ -370,6 +382,27 @@ function InventoryLogTab() {
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {(page > 0 || hasMore) && (
+        <div className="flex items-center justify-between px-1">
+          <button
+            className="btn-secondary"
+            onClick={() => setPage((p) => p - 1)}
+            disabled={page === 0 || loading}
+          >
+            ← Anterior
+          </button>
+          <span className="text-sm text-ink-500">Página {page + 1}</span>
+          <button
+            className="btn-secondary"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!hasMore || loading}
+          >
+            Siguiente →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
