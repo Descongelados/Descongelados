@@ -13,12 +13,14 @@ import {
   Package,
   ChevronDown,
   ChevronRight,
+  Receipt,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/format';
 import PageHeader from '../components/ui/PageHeader';
 import { FullPageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
+import SaleReceiptModal from '../components/ui/SaleReceiptModal';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -69,7 +71,8 @@ type SaleRow = {
   total: number;
   subtotal: number;
   tax: number;
-  customer: { name: string } | null;
+  status: string;
+  customer: { name: string; phone?: string } | null;
 };
 
 type CollectionRow = { amount: number; payment_method: string };
@@ -203,6 +206,7 @@ export default function Reports() {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   // ── "productos por período" state ──────────────────────────────────────────
@@ -227,7 +231,7 @@ export default function Reports() {
     const [salesRes, collectionsRes, purchasesRes, spRes] = await Promise.all([
       supabase
         .from('sales')
-        .select('id, invoice_number, sale_date, total, subtotal, tax, customer:customers(name)')
+        .select('id, invoice_number, sale_date, total, subtotal, tax, status, customer:customers(name, phone)')
         .eq('status', 'confirmada')
         .gte('sale_date', from)
         .lte('sale_date', end)
@@ -770,6 +774,7 @@ export default function Reports() {
                       <th className="table-head text-right">Subtotal</th>
                       <th className="table-head text-right">IVA</th>
                       <th className="table-head text-right">Total</th>
+                      <th className="table-head" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
@@ -781,6 +786,15 @@ export default function Reports() {
                         <td className="table-cell text-right">{formatCurrency(s.subtotal)}</td>
                         <td className="table-cell text-right">{formatCurrency(s.tax)}</td>
                         <td className="table-cell text-right font-semibold text-ink-900">{formatCurrency(s.total)}</td>
+                        <td className="table-cell text-center print:hidden">
+                          <button
+                            className="inline-flex items-center gap-1 text-xs text-brand-600 hover:text-brand-800 font-medium"
+                            onClick={() => setReceiptSale(s)}
+                            title="Ver ticket"
+                          >
+                            <Receipt size={14} /> Ticket
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -796,6 +810,7 @@ export default function Reports() {
                       <td className="table-cell text-right font-bold text-ink-900">
                         {formatCurrency(metrics.totalSales)}
                       </td>
+                      <td className="table-cell print:hidden" />
                     </tr>
                   </tfoot>
                 </table>
@@ -805,6 +820,11 @@ export default function Reports() {
 
         </div>
       )}
+
+      <SaleReceiptModal
+        sale={receiptSale as any}
+        onClose={() => setReceiptSale(null)}
+      />
     </div>
   );
 }
