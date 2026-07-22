@@ -121,7 +121,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
         applyWeek(supabase.from('collections').select('amount, payment_method'), 'collection_date'),
         applyWeek(supabase.from('supplier_payments').select('amount, payment_method'), 'payment_date'),
-        supabase.from('products').select('id, sku, name, stock, min_stock').eq('is_active', true),
+        supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
         supabase
           .from('sales')
           .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
@@ -176,8 +176,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         .filter((r) => r.payment_method === 'efectivo')
         .reduce((s, r) => s + r.amount, 0);
 
-      const lowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
-      const actualLowStock = lowStock.filter((p) => p.stock <= p.min_stock);
+      const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
 
       // Saldo real por cobrar: suma de (total - cobrado) de ventas entregadas con saldo > 0
       const deliveredSales = (allDeliveredSalesRes.data ?? []) as Array<{ id: string; total: number }>;
