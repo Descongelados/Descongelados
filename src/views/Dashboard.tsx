@@ -348,13 +348,28 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               tone={data.lowStockCount > 0 ? 'danger' : 'neutral'}
               hint="Requieren reposición"
             />
-            <StatCard
-              label="Ventas totales"
-              value={formatCurrency(data.totalSales)}
-              icon={TrendingUp}
-              tone="neutral"
-              hint="Facturas confirmadas · esta semana"
-            />
+            <div className="card p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success-50 text-success-600">
+                  <Banknote size={18} />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-ink-900">{formatCurrency(data.totalCollected)}</p>
+                  <p className="text-sm text-ink-500">Total cobrado esta semana</p>
+                </div>
+              </div>
+              <div className="flex gap-4 pt-3 border-t border-ink-100">
+                <div className="flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400 mb-0.5">Efectivo</p>
+                  <p className="text-base font-bold text-ink-800">{formatCurrency(data.cashSales)}</p>
+                </div>
+                <div className="w-px bg-ink-100" />
+                <div className="flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400 mb-0.5">Banco</p>
+                  <p className="text-base font-bold text-ink-800">{formatCurrency(data.totalCollected - data.cashSales)}</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
