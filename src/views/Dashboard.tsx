@@ -239,11 +239,11 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
             <StatCard
-              label="Ventas totales"
-              value={formatCurrency(data.totalSales)}
+              label="Cobrado esta semana"
+              value={formatCurrency(data.totalCollected)}
               icon={TrendingUp}
               tone="success"
-              hint="Facturas confirmadas · esta semana"
+              hint="Pagos recibidos de clientes · esta semana"
             />
             <StatCard
               label="Compras totales"
@@ -349,11 +349,11 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               hint="Requieren reposición"
             />
             <StatCard
-              label="Cobranza recibida"
-              value={formatCurrency(data.totalCollected)}
-              icon={Wallet}
-              tone="success"
-              hint="Pagos registrados · esta semana"
+              label="Ventas totales"
+              value={formatCurrency(data.totalSales)}
+              icon={TrendingUp}
+              tone="neutral"
+              hint="Facturas confirmadas · esta semana"
             />
           </div>
 
