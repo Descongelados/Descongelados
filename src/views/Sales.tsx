@@ -87,6 +87,8 @@ export default function Sales() {
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
         .gte('sale_date', mondayStr)
         .lte('sale_date', sundayStr)
+        // Excluir ventas ya entregadas: esas pertenecen al módulo de Cobranza
+        .neq('delivery_status', 'entregado')
         .order('sale_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
       supabase.from('products').select('id, sku, name, sale_price, cost_price, stock, unit, is_active').order('name'),
@@ -118,7 +120,7 @@ export default function Sales() {
     );
   }, [sales, search]);
 
-  const totalCollectedThisWeek = useMemo(
+  const totalWeek = useMemo(
     () => filtered.reduce((acc, s) => acc + s.total, 0),
     [filtered],
   );
@@ -309,8 +311,8 @@ export default function Sales() {
               <TrendingUp size={20} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalCollectedThisWeek)}</p>
-              <p className="text-sm text-ink-500">Recaudado esta semana</p>
+              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalWeek)}</p>
+              <p className="text-sm text-ink-500">Total ventas esta semana</p>
             </div>
           </div>
         </div>
@@ -321,7 +323,7 @@ export default function Sales() {
             </div>
             <div>
               <p className="text-2xl font-bold text-ink-900">{filtered.length}</p>
-              <p className="text-sm text-ink-500">Ventas esta semana</p>
+              <p className="text-sm text-ink-500">Ventas pendientes de entrega</p>
             </div>
           </div>
         </div>
@@ -717,4 +719,3 @@ export default function Sales() {
     </div>
   );
 }
-
