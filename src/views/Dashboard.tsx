@@ -340,21 +340,32 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-            <StatCard
-              label="Productos con stock bajo"
-              value={formatNumber(data.lowStockCount, 0)}
-              icon={AlertTriangle}
-              tone={data.lowStockCount > 0 ? 'danger' : 'neutral'}
-              hint="Requieren reposición"
-            />
-            <StatCard
-              label="Cobranza recibida"
-              value={formatCurrency(data.totalCollected)}
-              icon={Wallet}
-              tone="success"
-              hint="Pagos registrados · esta semana"
-            />
+          {/* ── Ventas de la semana + Cobranza realizada ── */}
+          <div className="card p-5 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Wallet size={18} className="text-success-600" />
+              <h3 className="font-semibold text-ink-900">Ventas de la semana + Cobranza realizada</h3>
+              <span className="ml-1 text-xs text-ink-400">· esta semana</span>
+            </div>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-success-50 text-success-600 shrink-0">
+                <Wallet size={20} />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-ink-900">{formatCurrency(data.totalCollected)}</p>
+                <p className="text-sm text-ink-500">Total cobrado esta semana</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Efectivo</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(data.cashSales)}</p>
+              </div>
+              <div className="rounded-xl bg-brand-50 border border-brand-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-600 mb-1">Banco</p>
+                <p className="text-xl font-bold text-brand-700">{formatCurrency(data.totalCollected - data.cashSales)}</p>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
