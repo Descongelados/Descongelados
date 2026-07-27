@@ -375,8 +375,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               {/* Ventas en efectivo */}
               <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Ventas en efectivo</p>
-                <p className="text-xl font-bold text-success-700">{formatCurrency(data.cashSales)}</p>
-                <p className="text-[11px] text-success-500 mt-1">Cobros en efectivo</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(data.collectedCash)}</p>
+                <p className="text-[11px] text-success-500 mt-1">Cobros en efectivo · esta semana</p>
               </div>
 
               {/* Gastos en efectivo */}
@@ -388,7 +388,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
 
               {/* Balance */}
               {(() => {
-                const balance = cashInitial + data.cashSales - data.cashExpenses;
+                const balance = cashInitial + data.collectedCash - data.cashExpenses;
                 const positive = balance >= 0;
                 return (
                   <div className={`rounded-xl border px-4 py-3 ${positive ? 'bg-brand-50 border-brand-200' : 'bg-warning-50 border-warning-200'}`}>
