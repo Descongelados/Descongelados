@@ -28,10 +28,12 @@ type DashboardData = {
   totalPurchases: number;
   totalCollected: number;
   weekSalesCollected: number;
+  bankSalesCollected: number;
   totalToCollect: number;
   totalToPay: number;
   cashSales: number;
   cashExpenses: number;
+  bankExpenses: number;
   lowStockCount: number;
   recentSales: Array<{
     id: string;
@@ -211,16 +213,20 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const weekSalesCollected = (allCollectionsRes.data ?? [] as Array<{ sale_id: string | null; amount: number }>)
         .filter((c: { sale_id: string | null; amount: number }) => c.sale_id && weekSaleIds.has(c.sale_id))
         .reduce((s: number, c: { sale_id: string | null; amount: number }) => s + c.amount, 0);
+      const bankSalesCollected = weekSalesCollected - cashSales;
+      const bankExpenses = totalPaid - cashExpenses;
 
       setData({
         totalSales,
         totalPurchases,
         totalCollected,
         weekSalesCollected,
+        bankSalesCollected,
         totalToCollect,
         totalToPay,
         cashSales,
         cashExpenses,
+        bankExpenses,
         lowStockCount: actualLowStock.length,
         recentSales: (recentSalesRes.data ?? []) as unknown as DashboardData['recentSales'],
         lowStockProducts: actualLowStock.slice(0, 5),
@@ -250,35 +256,64 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         <FullPageLoader label="Cargando panel…" />
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            <StatCard
-              label="Cobrado esta semana"
-              value={formatCurrency(data.weekSalesCollected)}
-              icon={TrendingUp}
-              tone="success"
-              hint="Cobros de ventas de esta semana"
-            />
-            <StatCard
-              label="Compras totales"
-              value={formatCurrency(data.totalPurchases)}
-              icon={ShoppingCart}
-              tone="brand"
-              hint="Órdenes a proveedores · esta semana"
-            />
-            <StatCard
-              label="Por cobrar"
-              value={formatCurrency(data.totalToCollect)}
-              icon={Wallet}
-              tone="accent"
-              hint="Ventas entregadas sin cobrar · esta semana"
-            />
-            <StatCard
-              label="Por pagar"
-              value={formatCurrency(data.totalToPay)}
-              icon={DollarSign}
-              tone="warning"
-              hint="Compras sin pagar · esta semana"
-            />
+          {/* ── Resumen de la semana ── */}
+          <div className="card p-5 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp size={18} className="text-brand-600" />
+              <h3 className="font-semibold text-ink-900">Resumen de la semana</h3>
+              <span className="ml-1 text-xs text-ink-400">· esta semana</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+
+              {/* Cobrado */}
+              <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Cobrado</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(data.weekSalesCollected)}</p>
+                <div className="flex gap-3 mt-2 pt-2 border-t border-success-200">
+                  <div className="flex-1">
+                    <p className="text-[11px] text-success-500 uppercase font-semibold">Efectivo</p>
+                    <p className="text-sm font-bold text-success-700">{formatCurrency(data.cashSales)}</p>
+                  </div>
+                  <div className="w-px bg-success-200" />
+                  <div className="flex-1">
+                    <p className="text-[11px] text-success-500 uppercase font-semibold">Banco</p>
+                    <p className="text-sm font-bold text-success-700">{formatCurrency(data.bankSalesCollected)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Compras */}
+              <div className="rounded-xl bg-brand-50 border border-brand-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-600 mb-1">Compras</p>
+                <p className="text-xl font-bold text-brand-700">{formatCurrency(data.totalPurchases)}</p>
+                <div className="flex gap-3 mt-2 pt-2 border-t border-brand-200">
+                  <div className="flex-1">
+                    <p className="text-[11px] text-brand-400 uppercase font-semibold">Efectivo</p>
+                    <p className="text-sm font-bold text-brand-700">{formatCurrency(data.cashExpenses)}</p>
+                  </div>
+                  <div className="w-px bg-brand-200" />
+                  <div className="flex-1">
+                    <p className="text-[11px] text-brand-400 uppercase font-semibold">Banco</p>
+                    <p className="text-sm font-bold text-brand-700">{formatCurrency(data.bankExpenses)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Por cobrar */}
+              <div className="rounded-xl bg-accent-50 border border-accent-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-accent-600 mb-1">Por cobrar</p>
+                <p className="text-xl font-bold text-accent-700">{formatCurrency(data.totalToCollect)}</p>
+                <p className="text-[11px] text-accent-500 mt-2">Ventas entregadas sin cobrar</p>
+              </div>
+
+              {/* Por pagar */}
+              <div className="rounded-xl bg-warning-50 border border-warning-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-warning-600 mb-1">Por pagar</p>
+                <p className="text-xl font-bold text-warning-700">{formatCurrency(data.totalToPay)}</p>
+                <p className="text-[11px] text-warning-500 mt-2">Compras sin pagar</p>
+              </div>
+
+            </div>
           </div>
 
           {/* ── Resumen Efectivo ── */}
