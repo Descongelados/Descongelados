@@ -341,7 +341,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           </div>
 
           {/* ── Ventas de la semana + Cobranza realizada ── */}
-          {/* v2 */}
           <div className="card p-5 mb-6">
             <div className="flex items-center gap-2 mb-4">
               <Wallet size={18} className="text-success-600" />
@@ -369,87 +368,45 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="card p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Clock size={18} className="text-brand-600" />
-                  <h3 className="font-semibold text-ink-900">Ventas recientes</h3>
-                </div>
-                <button
-                  onClick={() => onNavigate('sales')}
-                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
-                >
-                  Ver todas <ArrowRight size={12} />
-                </button>
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Clock size={18} className="text-brand-600" />
+                <h3 className="font-semibold text-ink-900">Ventas recientes</h3>
               </div>
-              {data.recentSales.length === 0 ? (
-                <EmptyState icon={TrendingUp} title="Sin ventas aún" description="Las ventas registradas aparecerán aquí." />
-              ) : (
-                <div className="space-y-1">
-                  {data.recentSales.map((sale) => (
-                    <div
-                      key={sale.id}
-                      className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-ink-50 transition"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-ink-800 truncate">
-                          {sale.customer?.name ?? 'Cliente eliminado'}
-                        </p>
-                        <p className="text-xs text-ink-500">
-                          {sale.invoice_number ? `Folio ${sale.invoice_number} · ` : ''}
-                          {formatDate(sale.sale_date)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-ink-900">{formatCurrency(sale.total)}</p>
-                        <Badge variant={sale.status === 'confirmada' ? 'success' : 'neutral'}>{sale.status}</Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <button
+                onClick={() => onNavigate('sales')}
+                className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+              >
+                Ver todas <ArrowRight size={12} />
+              </button>
             </div>
-
-            <div className="card p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle size={18} className="text-danger-600" />
-                  <h3 className="font-semibold text-ink-900">Alertas de inventario</h3>
-                </div>
-                <button
-                  onClick={() => onNavigate('inventory')}
-                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
-                >
-                  Ver inventario <ArrowRight size={12} />
-                </button>
+            {data.recentSales.length === 0 ? (
+              <EmptyState icon={TrendingUp} title="Sin ventas aún" description="Las ventas registradas aparecerán aquí." />
+            ) : (
+              <div className="space-y-1">
+                {data.recentSales.map((sale) => (
+                  <div
+                    key={sale.id}
+                    className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-ink-50 transition"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-ink-800 truncate">
+                        {sale.customer?.name ?? 'Cliente eliminado'}
+                      </p>
+                      <p className="text-xs text-ink-500">
+                        {sale.invoice_number ? `Folio ${sale.invoice_number} · ` : ''}
+                        {formatDate(sale.sale_date)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-ink-900">{formatCurrency(sale.total)}</p>
+                      <Badge variant={sale.status === 'confirmada' ? 'success' : 'neutral'}>{sale.status}</Badge>
+                    </div>
+                  </div>
+                ))}
               </div>
-              {data.lowStockProducts.length === 0 ? (
-                <EmptyState
-                  icon={Package}
-                  title="Inventario saludable"
-                  description="Todos los productos están por encima del stock mínimo."
-                />
-              ) : (
-                <div className="space-y-1">
-                  {data.lowStockProducts.map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-ink-50 transition"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-ink-800 truncate">{p.name}</p>
-                        <p className="text-xs text-ink-500">SKU {p.sku}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-danger-600">{formatNumber(p.stock, 0)}</p>
-                        <p className="text-xs text-ink-400">mín. {formatNumber(p.min_stock, 0)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </>
       )}
