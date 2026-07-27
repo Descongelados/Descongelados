@@ -48,24 +48,47 @@ type DashboardData = {
   lowStockProducts: Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
 };
 
-/** Returns ISO date strings for Monday and Sunday of the current week (Mon–Sun). */
-function currentWeekRange(): { monday: string; sunday: string; label: string } {
+/**
+ * Returns the Monday–Sunday range of the current week expressed as full ISO-8601
+ * timestamps that include the local timezone offset, so Supabase (which stores
+ * timestamptz in UTC) compares correctly against the user's local calendar week.
+ *
+ *   mondayISO → "2025-07-28T00:00:00-06:00"
+ *   sundayISO → "2025-08-03T23:59:59-06:00"
+ */
+function currentWeekRange(): { mondayISO: string; sundayISO: string; label: string } {
   const now = new Date();
   const day = now.getDay(); // 0 Sun … 6 Sat
   // Days back to Monday (Sunday counts as end of previous week → -6)
   const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  // Build Monday at local 00:00:00
   const monday = new Date(now);
   monday.setDate(now.getDate() + diffToMonday);
+  monday.setHours(0, 0, 0, 0);
+
+  // Build Sunday at local 23:59:59
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
 
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  /** Format a Date as "YYYY-MM-DDTHH:mm:ss±HH:MM" preserving the local offset. */
+  const toLocalISO = (d: Date): string => {
+    const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+    const offsetMin = -d.getTimezoneOffset(); // positive east of UTC
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const absMin = Math.abs(offsetMin);
+    const offsetStr = `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+      `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${offsetStr}`
+    );
+  };
 
   const labelFmt = new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'short' });
   const label = `${labelFmt.format(monday)} – ${labelFmt.format(sunday)}`;
 
-  return { monday: fmt(monday), sunday: fmt(sunday), label };
+  return { mondayISO: toLocalISO(monday), sundayISO: toLocalISO(sunday), label };
 }
 
 export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
@@ -101,14 +124,14 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       .upsert({ key: 'dashboard_cash_initial', value: { amount: val } });
   };
 
-  const { monday, sunday, label: weekLabel } = currentWeekRange();
+  const { mondayISO, sundayISO, label: weekLabel } = currentWeekRange();
 
   useEffect(() => {
     const load = async () => {
       setData(null);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const applyWeek = (query: any, dateCol: string) =>
-        query.gte(dateCol, monday).lte(dateCol, `${sunday}T23:59:59`);
+        query.gte(dateCol, mondayISO).lte(dateCol, sundayISO);
 
       // ── Fase 1: queries independientes (no necesitan IDs de otras tablas) ──
       const [
@@ -131,8 +154,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         supabase
           .from('sales')
           .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
-          .gte('sale_date', monday)
-          .lte('sale_date', `${sunday}T23:59:59`)
+          .gte('sale_date', mondayISO)
+          .lte('sale_date', sundayISO)
           .order('sale_date', { ascending: false })
           .limit(10),
         // Todos los IDs de ventas de la semana (sin límite) para calcular cobros
@@ -140,8 +163,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .from('sales')
           .select('id')
           .eq('status', 'confirmada')
-          .gte('sale_date', monday)
-          .lte('sale_date', `${sunday}T23:59:59`),
+          .gte('sale_date', mondayISO)
+          .lte('sale_date', sundayISO),
         // Ventas entregadas (sin límite de fecha) para calcular saldo por cobrar
         supabase
           .from('sales')
@@ -477,3 +500,4 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
     </div>
   );
 }
+
