@@ -27,6 +27,7 @@ type DashboardData = {
   totalSales: number;
   totalPurchases: number;
   totalCollected: number;
+  weekSalesCollected: number;
   totalToCollect: number;
   totalToPay: number;
   cashSales: number;
@@ -116,6 +117,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         allCollectionsRes,
         allPurchasesRes,
         allSupPaymentsRes,
+        weekSalesCollectionsRes,
       ] = await Promise.all([
         applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
@@ -147,6 +149,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         ),
         // Pagos a proveedores (todos) para calcular saldo por pagar
         supabase.from('supplier_payments').select('purchase_id, amount'),
+        // IDs de ventas creadas esta semana (para filtrar cobros de la semana)
+        applyWeek(supabase.from('sales').select('id').eq('status', 'confirmada'), 'sale_date'),
       ]);
 
       if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
@@ -200,10 +204,19 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         return acc + Math.max(0, balance);
       }, 0);
 
+      // Cobros de ventas creadas esta semana (cruce por sale_id)
+      const weekSaleIds = new Set(
+        ((weekSalesCollectionsRes.data ?? []) as Array<{ id: string }>).map((s) => s.id)
+      );
+      const weekSalesCollected = (allCollectionsRes.data ?? [] as Array<{ sale_id: string | null; amount: number }>)
+        .filter((c: { sale_id: string | null; amount: number }) => c.sale_id && weekSaleIds.has(c.sale_id))
+        .reduce((s: number, c: { sale_id: string | null; amount: number }) => s + c.amount, 0);
+
       setData({
         totalSales,
         totalPurchases,
         totalCollected,
+        weekSalesCollected,
         totalToCollect,
         totalToPay,
         cashSales,
@@ -240,10 +253,10 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
             <StatCard
               label="Cobrado esta semana"
-              value={formatCurrency(data.totalCollected)}
+              value={formatCurrency(data.weekSalesCollected)}
               icon={TrendingUp}
               tone="success"
-              hint="Pagos recibidos de clientes · esta semana"
+              hint="Cobros de ventas de esta semana"
             />
             <StatCard
               label="Compras totales"
