@@ -161,7 +161,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       // ── Fase 2: queries filtradas por IDs conocidos ──
       const [allCollectionsRes, allSupPaymentsRes] = await Promise.all([
         saleIdsForCollections.length > 0
-          ? supabase.from('collections').select('sale_id, amount').in('sale_id', saleIdsForCollections)
+          ? supabase.from('collections').select('sale_id, amount, payment_method').in('sale_id', saleIdsForCollections)
           : Promise.resolve({ data: [], error: null }),
         allPurchaseIds.length > 0
           ? supabase.from('supplier_payments').select('purchase_id, amount').in('purchase_id', allPurchaseIds)
@@ -181,10 +181,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
       const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
 
-      // efectivo = cobros en efectivo de ventas esta semana
-      const cashSales = collections
-        .filter((r) => r.payment_method === 'efectivo')
-        .reduce((s, r) => s + r.amount, 0);
       // gastos en efectivo = pagos a proveedores en efectivo esta semana
       const cashExpenses = supplierPayments
         .filter((r) => r.payment_method === 'efectivo')
@@ -212,12 +208,14 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         return acc + Math.max(0, balance);
       }, 0);
 
-      // Cobros de ventas creadas esta semana (cruce por sale_id)
-      const weekSalesCollected = (allCollectionsRes.data ?? [])
-        .filter((c: { sale_id: string | null; amount: number }) => c.sale_id && weekSaleIds.has(c.sale_id))
-        .reduce((s: number, c: { sale_id: string | null; amount: number }) => s + c.amount, 0);
-      const bankSalesCollected = weekSalesCollected - cashSales;
-      const bankExpenses = totalPaid - cashExpenses;
+      // Cobros de ventas creadas esta semana — efectivo y banco desde el mismo conjunto
+      type ColRow = { sale_id: string | null; amount: number; payment_method: string };
+      const weekCollections = (allCollectionsRes.data ?? [] as ColRow[])
+        .filter((c: ColRow) => c.sale_id && weekSaleIds.has(c.sale_id));
+      const weekSalesCollected  = weekCollections.reduce((s: number, c: ColRow) => s + c.amount, 0);
+      const cashSales           = weekCollections.filter((c: ColRow) => c.payment_method === 'efectivo').reduce((s: number, c: ColRow) => s + c.amount, 0);
+      const bankSalesCollected  = weekCollections.filter((c: ColRow) => c.payment_method === 'banco').reduce((s: number, c: ColRow) => s + c.amount, 0);
+      const bankExpenses        = totalPaid - cashExpenses;
 
       setData({
         totalSales,
