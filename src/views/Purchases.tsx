@@ -55,12 +55,9 @@ const EXPENSE_CATEGORIES = [
   'Renta / Local',
   'Servicios (luz, agua, gas)',
   'Gasolina / Transporte',
-  'Salarios / Nomina',
-  'Mantenimiento',
   'Publicidad / Marketing',
-  'Equipo / Herramientas',
-  'Limpieza / Suministros',
   'Impuestos / Tramites',
+  'Prestamo p/compras',
   'Otro',
 ];
 
