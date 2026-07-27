@@ -341,6 +341,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           </div>
 
           {/* ── Ventas de la semana + Cobranza realizada ── */}
+          {/* v2 */}
           <div className="card p-5 mb-6">
             <div className="flex items-center gap-2 mb-4">
               <Wallet size={18} className="text-success-600" />
