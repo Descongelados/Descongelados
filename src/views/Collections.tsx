@@ -120,15 +120,22 @@ export default function Collections({ onDataChanged }: Props) {
 
   const load = async () => {
     setLoading(true);
+    // Últimos 6 meses — evita descargar todo el histórico
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
+
     const [sRes, cRes, custRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
         .eq('status', 'confirmada')
+        .gte('sale_date', sixMonthsAgoStr)
         .order('sale_date', { ascending: false }),
       supabase
         .from('collections')
         .select('id, sale_id, customer_id, amount, payment_method, collection_date, reference, notes, created_at, customer:customers(id, name), sale:sales(id, invoice_number, total)')
+        .gte('collection_date', sixMonthsAgoStr)
         .order('collection_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
     ]);

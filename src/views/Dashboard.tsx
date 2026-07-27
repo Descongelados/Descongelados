@@ -108,6 +108,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const applyWeek = (query: any, dateCol: string) =>
         query.gte(dateCol, monday).lte(dateCol, `${sunday}T23:59:59`);
 
+      // ── Fase 1: queries independientes (no necesitan IDs de otras tablas) ──
       const [
         salesRes,
         purchasesRes,
@@ -116,10 +117,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         lowStockRes,
         recentSalesRes,
         allDeliveredSalesRes,
-        allCollectionsRes,
         allPurchasesRes,
-        allSupPaymentsRes,
-        weekSalesCollectionsRes,
       ] = await Promise.all([
         applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
@@ -133,32 +131,42 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .lte('sale_date', `${sunday}T23:59:59`)
           .order('sale_date', { ascending: false })
           .limit(10),
-        // Ventas entregadas de esta semana para calcular saldo por cobrar
-        applyWeek(
-          supabase
-            .from('sales')
-            .select('id, total')
-            .eq('status', 'confirmada')
-            .eq('delivery_status', 'entregado'),
-          'sale_date'
-        ),
-        // Cobros de ventas de esta semana para calcular saldo por cobrar
-        supabase.from('collections').select('sale_id, amount'),
-        // Compras de esta semana para calcular saldo por pagar
-        applyWeek(
-          supabase.from('purchases').select('id, total').eq('status', 'confirmada'),
-          'purchase_date'
-        ),
-        // Pagos a proveedores (todos) para calcular saldo por pagar
-        supabase.from('supplier_payments').select('purchase_id, amount'),
-        // IDs de ventas creadas esta semana (para filtrar cobros de la semana)
-        applyWeek(supabase.from('sales').select('id').eq('status', 'confirmada'), 'sale_date'),
+        // Ventas entregadas (sin límite de fecha) para calcular saldo por cobrar
+        supabase
+          .from('sales')
+          .select('id, total')
+          .eq('status', 'confirmada')
+          .eq('delivery_status', 'entregado'),
+        // Compras confirmadas (sin límite de fecha) para calcular saldo por pagar
+        supabase.from('purchases').select('id, total').eq('status', 'confirmada'),
       ]);
 
       if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
         setError('No se pudieron cargar las métricas');
         return;
       }
+
+      // IDs necesarios para filtrar collections y supplier_payments en Fase 2
+      const deliveredSales = (allDeliveredSalesRes.data ?? []) as Array<{ id: string; total: number }>;
+      const allPurchases   = (allPurchasesRes.data   ?? []) as Array<{ id: string; total: number }>;
+      const weekSales      = (recentSalesRes.data     ?? []) as Array<{ id: string }>;
+
+      const deliveredSaleIds  = deliveredSales.map((s) => s.id);
+      const weekSaleIds       = new Set(weekSales.map((s) => s.id));
+      const allPurchaseIds    = allPurchases.map((p) => p.id);
+
+      // IDs de ventas que necesitamos cobros: entregadas + semana actual (union)
+      const saleIdsForCollections = [...new Set([...deliveredSaleIds, ...weekSaleIds])];
+
+      // ── Fase 2: queries filtradas por IDs conocidos ──
+      const [allCollectionsRes, allSupPaymentsRes] = await Promise.all([
+        saleIdsForCollections.length > 0
+          ? supabase.from('collections').select('sale_id, amount').in('sale_id', saleIdsForCollections)
+          : Promise.resolve({ data: [], error: null }),
+        allPurchaseIds.length > 0
+          ? supabase.from('supplier_payments').select('purchase_id, amount').in('purchase_id', allPurchaseIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
 
       const sum = (rows: Array<{ total?: number; amount?: number }>) =>
         rows.reduce((acc, r) => acc + (r.total ?? r.amount ?? 0), 0);
@@ -185,7 +193,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
 
       // Saldo real por cobrar: suma de (total - cobrado) de ventas entregadas con saldo > 0
-      const deliveredSales = (allDeliveredSalesRes.data ?? []) as Array<{ id: string; total: number }>;
       const colBySale = new Map<string, number>();
       for (const c of (allCollectionsRes.data ?? []) as Array<{ sale_id: string | null; amount: number }>) {
         if (c.sale_id) colBySale.set(c.sale_id, (colBySale.get(c.sale_id) ?? 0) + c.amount);
@@ -196,7 +203,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       }, 0);
 
       // Saldo real por pagar: suma de (total - pagado) de compras con saldo > 0
-      const allPurchases = (allPurchasesRes.data ?? []) as Array<{ id: string; total: number }>;
       const payByPurchase = new Map<string, number>();
       for (const p of (allSupPaymentsRes.data ?? []) as Array<{ purchase_id: string | null; amount: number }>) {
         if (p.purchase_id) payByPurchase.set(p.purchase_id, (payByPurchase.get(p.purchase_id) ?? 0) + p.amount);
@@ -207,10 +213,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       }, 0);
 
       // Cobros de ventas creadas esta semana (cruce por sale_id)
-      const weekSaleIds = new Set(
-        ((weekSalesCollectionsRes.data ?? []) as Array<{ id: string }>).map((s) => s.id)
-      );
-      const weekSalesCollected = (allCollectionsRes.data ?? [] as Array<{ sale_id: string | null; amount: number }>)
+      const weekSalesCollected = (allCollectionsRes.data ?? [])
         .filter((c: { sale_id: string | null; amount: number }) => c.sale_id && weekSaleIds.has(c.sale_id))
         .reduce((s: number, c: { sale_id: string | null; amount: number }) => s + c.amount, 0);
       const bankSalesCollected = weekSalesCollected - cashSales;
