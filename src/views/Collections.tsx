@@ -266,14 +266,15 @@ export default function Collections({ onDataChanged }: Props) {
   }, [tab, pendingDeliveries, deliveredSalesWeek, search]);
 
   const totalCollectedToday = useMemo(() => {
-    // Use local date (not UTC) so "today" matches the user's calendar day
+    // Only count collections whose sale belongs to the current week
+    const weekSaleIdSet = new Set(salesWithBalanceWeek.map((s) => s.id));
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     return (collections ?? [])
-      .filter((c) => c.collection_date.slice(0, 10) === today)
+      .filter((c) => c.collection_date.slice(0, 10) === today && c.sale_id && weekSaleIdSet.has(c.sale_id))
       .reduce((acc, c) => acc + c.amount, 0);
-  }, [collections]);
+  }, [collections, salesWithBalanceWeek]);
 
   const totalPendingCollect = useMemo(
     () => salesWithBalance.reduce((acc, s) => acc + Math.max(s.balance, 0), 0),
@@ -1439,4 +1440,5 @@ export default function Collections({ onDataChanged }: Props) {
     </div>
   );
 }
+
 
