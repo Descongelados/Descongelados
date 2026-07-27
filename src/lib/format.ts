@@ -16,6 +16,15 @@ export const formatNumber = (value: number, decimals = 2): string => {
   }).format(n);
 };
 
+/** Muestra stock con hasta 3 decimales, sin ceros innecesarios. Ej: 6.125 → "6.125", 6.0 → "6" */
+export const formatStock = (value: number): string => {
+  const n = Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat('es-MX', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  }).format(n);
+};
+
 export const formatDate = (value: string | Date | null): string => {
   if (!value) return '—';
   const d = typeof value === 'string' ? new Date(value) : value;

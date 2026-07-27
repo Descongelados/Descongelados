@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Package, Plus, Pencil, Trash2, Search, Filter, DollarSign, TrendingUp, BarChart2, ShoppingBag, ClipboardList, ArrowUp, ArrowDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Product, InventoryLog } from '../lib/types';
-import { formatCurrency, formatNumber, formatDateTime } from '../lib/format';
+import { formatCurrency, formatNumber, formatStock, formatDateTime } from '../lib/format';
 import PageHeader from '../components/ui/PageHeader';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
@@ -150,7 +150,7 @@ function InventoryValueTab({ products }: { products: Product[] }) {
                         <div className="font-semibold text-ink-900">{p.name}</div>
                         <div className="text-xs text-ink-500">SKU {p.sku} · {p.category ?? 'Sin categoría'}</div>
                       </td>
-                      <td className="table-cell text-right">{formatNumber(p.stock, 0)} {p.unit}</td>
+                      <td className="table-cell text-right">{formatStock(p.stock)} {p.unit}</td>
                       <td className="table-cell text-right">{formatCurrency(p.cost_price)}</td>
                       <td className="table-cell text-right">{formatCurrency(p.sale_price)}</td>
                       <td className="table-cell text-right font-semibold">{formatCurrency(invested)}</td>
@@ -774,7 +774,7 @@ export default function Inventory() {
                                 out ? 'text-danger-600' : low ? 'text-warning-600' : 'text-ink-900'
                               }`}
                             >
-                              {formatNumber(p.stock, 0)}
+                              {formatStock(p.stock)}
                             </span>
                             {out && <div className="text-[10px] text-danger-500">agotado</div>}
                             {low && <div className="text-[10px] text-warning-500">bajo</div>}
