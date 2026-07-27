@@ -330,8 +330,9 @@ export default function Reports() {
       const costPrice = it.product?.cost_price ?? 0;
       return acc + (it.unit_price - costPrice) * it.quantity;
     }, 0);
-    const gananciaEfectivo = colEfectivo - spEfectivo;
-    const gananciaBanco = colBanco - spBanco;
+    // Distribuir ganancia por método de pago de forma proporcional al cobrado
+    const gananciaEfectivo = totalCollected > 0 ? ganancia * (colEfectivo / totalCollected) : 0;
+    const gananciaBanco    = totalCollected > 0 ? ganancia * (colBanco    / totalCollected) : 0;
 
     // products sold
     const productMap = new Map<string, { name: string; qty: number; total: number }>();
