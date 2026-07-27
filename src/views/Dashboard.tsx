@@ -116,6 +116,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         supplierPaymentsRes,
         lowStockRes,
         recentSalesRes,
+        allWeekSalesRes,
         allDeliveredSalesRes,
         allPurchasesRes,
       ] = await Promise.all([
@@ -124,6 +125,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         applyWeek(supabase.from('collections').select('amount, payment_method'), 'collection_date'),
         applyWeek(supabase.from('supplier_payments').select('amount, payment_method'), 'payment_date'),
         supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
+        // Últimas 10 ventas para display
         supabase
           .from('sales')
           .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
@@ -131,6 +133,13 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
           .lte('sale_date', `${sunday}T23:59:59`)
           .order('sale_date', { ascending: false })
           .limit(10),
+        // Todos los IDs de ventas de la semana (sin límite) para calcular cobros
+        supabase
+          .from('sales')
+          .select('id')
+          .eq('status', 'confirmada')
+          .gte('sale_date', monday)
+          .lte('sale_date', `${sunday}T23:59:59`),
         // Ventas entregadas (sin límite de fecha) para calcular saldo por cobrar
         supabase
           .from('sales')
@@ -148,11 +157,11 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
 
       // IDs necesarios para filtrar collections y supplier_payments en Fase 2
       const deliveredSales = (allDeliveredSalesRes.data ?? []) as Array<{ id: string; total: number }>;
-      const allPurchases   = (allPurchasesRes.data   ?? []) as Array<{ id: string; total: number }>;
-      const weekSales      = (recentSalesRes.data     ?? []) as Array<{ id: string }>;
+      const allPurchases   = (allPurchasesRes.data      ?? []) as Array<{ id: string; total: number }>;
 
       const deliveredSaleIds  = deliveredSales.map((s) => s.id);
-      const weekSaleIds       = new Set(weekSales.map((s) => s.id));
+      // Usar query sin límite para tener TODOS los IDs de ventas de la semana
+      const weekSaleIds       = new Set(((allWeekSalesRes.data ?? []) as Array<{ id: string }>).map((s) => s.id));
       const allPurchaseIds    = allPurchases.map((p) => p.id);
 
       // IDs de ventas que necesitamos cobros: entregadas + semana actual (union)
