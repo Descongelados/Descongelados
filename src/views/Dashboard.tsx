@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import {
   DollarSign,
   ShoppingCart,
@@ -239,11 +239,11 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
             <StatCard
-              label="Ventas totales"
-              value={formatCurrency(data.totalSales)}
+              label="Cobrado esta semana"
+              value={formatCurrency(data.totalCollected)}
               icon={TrendingUp}
               tone="success"
-              hint="Facturas confirmadas · esta semana"
+              hint="Pagos recibidos de clientes · esta semana"
             />
             <StatCard
               label="Compras totales"
@@ -257,14 +257,14 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               value={formatCurrency(data.totalToCollect)}
               icon={Wallet}
               tone="accent"
-              hint="Saldo pendiente clientes · esta semana"
+              hint="Ventas entregadas sin cobrar · esta semana"
             />
             <StatCard
               label="Por pagar"
               value={formatCurrency(data.totalToPay)}
               icon={DollarSign}
               tone="warning"
-              hint="Saldo pendiente proveedores · esta semana"
+              hint="Compras sin pagar · esta semana"
             />
           </div>
 
