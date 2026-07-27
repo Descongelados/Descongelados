@@ -27,6 +27,8 @@ type DashboardData = {
   totalSales: number;
   totalPurchases: number;
   totalCollected: number;
+  collectedCash: number;
+  collectedBank: number;
   weekSalesCollected: number;
   bankSalesCollected: number;
   totalToCollect: number;
@@ -188,6 +190,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const supplierPayments = (supplierPaymentsRes.data ?? []) as PayRow[];
 
       const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
+      const collectedCash  = collections.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0);
+      const collectedBank  = collections.filter((r) => r.payment_method === 'banco').reduce((s, r) => s + r.amount, 0);
       const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
 
       // gastos en efectivo = pagos a proveedores en efectivo esta semana
@@ -230,6 +234,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         totalSales,
         totalPurchases,
         totalCollected,
+        collectedCash,
+        collectedBank,
         weekSalesCollected,
         bankSalesCollected,
         totalToCollect,
@@ -417,11 +423,11 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Efectivo</p>
-                <p className="text-xl font-bold text-success-700">{formatCurrency(data.cashSales)}</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(data.collectedCash)}</p>
               </div>
               <div className="rounded-xl bg-brand-50 border border-brand-200 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-brand-600 mb-1">Banco</p>
-                <p className="text-xl font-bold text-brand-700">{formatCurrency(data.totalCollected - data.cashSales)}</p>
+                <p className="text-xl font-bold text-brand-700">{formatCurrency(data.collectedBank)}</p>
               </div>
             </div>
           </div>
