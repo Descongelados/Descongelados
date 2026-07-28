@@ -137,6 +137,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const [
         salesRes,
         purchasesRes,
+        collectionsRes,
         supplierPaymentsRes,
         lowStockRes,
         recentSalesRes,
@@ -146,6 +147,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       ] = await Promise.all([
         applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
+        applyWeek(supabase.from('collections').select('amount, payment_method'), 'collection_date'),
         applyWeek(supabase.from('supplier_payments').select('amount, payment_method'), 'payment_date'),
         supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
         // Últimas 10 ventas para display
@@ -173,7 +175,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         supabase.from('purchases').select('id, total').eq('status', 'confirmada'),
       ]);
 
-      if (salesRes.error || purchasesRes.error || supplierPaymentsRes.error || lowStockRes.error) {
+      if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
         setError('No se pudieron cargar las métricas');
         return;
       }
@@ -207,8 +209,12 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const totalPurchases = sum((purchasesRes.data ?? []) as Array<{ total: number }>);
 
       type PayRow = { amount: number; payment_method: string };
+      const collections = (collectionsRes.data ?? []) as PayRow[];
       const supplierPayments = (supplierPaymentsRes.data ?? []) as PayRow[];
 
+      const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
+      const collectedCash  = collections.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0);
+      const collectedBank  = collections.filter((r) => r.payment_method === 'banco').reduce((s, r) => s + r.amount, 0);
       const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
 
       // gastos en efectivo = pagos a proveedores en efectivo esta semana
@@ -238,7 +244,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         return acc + Math.max(0, balance);
       }, 0);
 
-      // Cobros de ventas creadas esta semana — todas las métricas se basan en sale_id ∈ weekSaleIds
+      // Cobros de ventas creadas esta semana — efectivo y banco desde el mismo conjunto
       type ColRow = { sale_id: string | null; amount: number; payment_method: string };
       const weekCollections = (allCollectionsRes.data ?? [] as ColRow[])
         .filter((c: ColRow) => c.sale_id && weekSaleIds.has(c.sale_id));
@@ -246,11 +252,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const cashSales           = weekCollections.filter((c: ColRow) => c.payment_method === 'efectivo').reduce((s: number, c: ColRow) => s + c.amount, 0);
       const bankSalesCollected  = weekCollections.filter((c: ColRow) => c.payment_method === 'banco').reduce((s: number, c: ColRow) => s + c.amount, 0);
       const bankExpenses        = totalPaid - cashExpenses;
-
-      // totalCollected / collectedCash / collectedBank = cobros de ventas de esta semana
-      const totalCollected = weekSalesCollected;
-      const collectedCash  = cashSales;
-      const collectedBank  = bankSalesCollected;
 
       setData({
         totalSales,
@@ -438,18 +439,18 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
                 <Wallet size={20} />
               </div>
               <div>
-                <p className="text-2xl font-bold text-ink-900">{formatCurrency(data.weekSalesCollected)}</p>
-                <p className="text-sm text-ink-500">Total cobrado de ventas de esta semana</p>
+                <p className="text-2xl font-bold text-ink-900">{formatCurrency(data.totalCollected)}</p>
+                <p className="text-sm text-ink-500">Total cobrado esta semana</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Efectivo</p>
-                <p className="text-xl font-bold text-success-700">{formatCurrency(data.cashSales)}</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(data.collectedCash)}</p>
               </div>
               <div className="rounded-xl bg-brand-50 border border-brand-200 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-brand-600 mb-1">Banco</p>
-                <p className="text-xl font-bold text-brand-700">{formatCurrency(data.bankSalesCollected)}</p>
+                <p className="text-xl font-bold text-brand-700">{formatCurrency(data.collectedBank)}</p>
               </div>
             </div>
           </div>
@@ -499,6 +500,4 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
     </div>
   );
 }
-
-
 

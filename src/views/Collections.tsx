@@ -191,16 +191,10 @@ export default function Collections({ onDataChanged }: Props) {
   }, [sales, paidBySale]);
 
   // Sales within the current week (used for entregas + cobradas tabs)
-  // Compare using the local-date string to avoid UTC-vs-local shift
   const salesWithBalanceWeek = useMemo(
     () => salesWithBalance.filter((s) => {
-      // sale_date from Supabase is an ISO string; extract only the date part
-      // and compare against week boundaries expressed as YYYY-MM-DD strings
-      const saleDay = s.sale_date.slice(0, 10);
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const fmtDate = (d: Date) =>
-        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-      return saleDay >= fmtDate(weekStart) && saleDay <= fmtDate(weekEnd);
+      const d = new Date(s.sale_date);
+      return d >= weekStart && d <= weekEnd;
     }),
     [salesWithBalance, weekStart, weekEnd],
   );
@@ -266,15 +260,11 @@ export default function Collections({ onDataChanged }: Props) {
   }, [tab, pendingDeliveries, deliveredSalesWeek, search]);
 
   const totalCollectedToday = useMemo(() => {
-    // Only count collections whose sale belongs to the current week
-    const weekSaleIdSet = new Set(salesWithBalanceWeek.map((s) => s.id));
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const today = new Date().toISOString().slice(0, 10);
     return (collections ?? [])
-      .filter((c) => c.collection_date.slice(0, 10) === today && c.sale_id && weekSaleIdSet.has(c.sale_id))
+      .filter((c) => c.collection_date.slice(0, 10) === today)
       .reduce((acc, c) => acc + c.amount, 0);
-  }, [collections, salesWithBalanceWeek]);
+  }, [collections]);
 
   const totalPendingCollect = useMemo(
     () => salesWithBalance.reduce((acc, s) => acc + Math.max(s.balance, 0), 0),
@@ -1440,5 +1430,3 @@ export default function Collections({ onDataChanged }: Props) {
     </div>
   );
 }
-
-
