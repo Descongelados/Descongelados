@@ -91,7 +91,6 @@ export default function Sales() {
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
         .gte('sale_date', mondayStr)
         .lte('sale_date', sundayStr)
-        // Excluir ventas ya entregadas: esas pertenecen al módulo de Cobranza
         .neq('delivery_status', 'entregado')
         .order('sale_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
@@ -148,41 +147,17 @@ export default function Sales() {
     });
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
     setModalOpen(true);
-    // Genera el folio consultando el máximo histórico en la BD
     const { data } = await supabase.rpc('next_invoice_number');
     if (data) setForm((prev) => ({ ...prev, invoice_number: data as string }));
   };
 
+  // ✅ FIX: fetch items BEFORE setting any state so React batches everything
+  // in one render and the modal opens with data already loaded.
   const openEdit = async (s: SaleRow) => {
-    const rows = existingItems ?? [];
-
-    // Store original committed quantities so save() can compute effective stock
-    originalItemsRef.current = rows.map((it) => ({
-      product_id: it.product_id,
-      quantity: Number(it.quantity),
-    }));
-
-    setEditing(s);
-    setForm({
-      customer_id: s.customer_id,
-      invoice_number: s.invoice_number ?? '',
-      sale_date: toDateInputValue(s.sale_date),
-      notes: s.notes ?? '',
-      status: s.status,
-      has_tax: Number(s.tax) > 0,
-    });
-    setItems(
-      rows.length > 0
-        ? rows.map((it) => ({
-            id: it.id,
-            product_id: it.product_id,
-            quantity: String(it.quantity),
-            unit_price: String(it.unit_price),
-          }))
-        : [{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }],
-    );
-    setModalOpen(true);
-  };
+    const { data: existingItems, error: itemsError } = await supabase
+      .from('sale_items')
+      .select('*')
+      .eq('sale_id', s.id);
 
     if (itemsError) {
       push('error', 'No se pudieron cargar los productos de la venta');
@@ -191,7 +166,6 @@ export default function Sales() {
 
     const rows = existingItems ?? [];
 
-    // Store original committed quantities so save() can compute effective stock
     originalItemsRef.current = rows.map((it) => ({
       product_id: it.product_id,
       quantity: Number(it.quantity),
@@ -233,21 +207,12 @@ export default function Sales() {
   };
 
   const save = async () => {
-    if (!form.customer_id) {
-      push('error', 'Selecciona un cliente');
-      return;
-    }
+    if (!form.customer_id) { push('error', 'Selecciona un cliente'); return; }
     const validItems = items.filter((it) => it.product_id && Number(it.quantity) > 0);
-    if (validItems.length === 0) {
-      push('error', 'Agrega al menos un producto');
-      return;
-    }
+    if (validItems.length === 0) { push('error', 'Agrega al menos un producto'); return; }
     for (const it of validItems) {
       const product = products.find((p) => p.id === it.product_id);
       if (product) {
-        // When editing, the stock shown is already after the original sale was
-        // committed. Add back the originally committed quantity so we validate
-        // against the true available stock for this edit.
         const originalQty = editing
           ? (originalItemsRef.current.find((o) => o.product_id === it.product_id)?.quantity ?? 0)
           : 0;
@@ -272,11 +237,7 @@ export default function Sales() {
 
     if (editing) {
       const { error } = await supabase.from('sales').update(payload).eq('id', editing.id);
-      if (error) {
-        push('error', 'No se pudo actualizar la venta');
-        setSaving(false);
-        return;
-      }
+      if (error) { push('error', 'No se pudo actualizar la venta'); setSaving(false); return; }
       await supabase.from('sale_items').delete().eq('sale_id', editing.id);
       const itemPayload = validItems.map((it) => ({
         sale_id: editing.id,
@@ -286,22 +247,14 @@ export default function Sales() {
         subtotal: Number(it.quantity) * Number(it.unit_price),
       }));
       const { error: itemErr } = await supabase.from('sale_items').insert(itemPayload);
-      if (itemErr) {
-        push('error', 'No se guardaron los productos');
-        setSaving(false);
-        return;
-      }
+      if (itemErr) { push('error', 'No se guardaron los productos'); setSaving(false); return; }
       push('success', 'Venta actualizada');
       setModalOpen(false);
       load();
       setSaving(false);
     } else {
       const { data: created, error } = await supabase.from('sales').insert(payload).select().single();
-      if (error) {
-        push('error', 'No se pudo crear la venta');
-        setSaving(false);
-        return;
-      }
+      if (error) { push('error', 'No se pudo crear la venta'); setSaving(false); return; }
       const itemPayload = validItems.map((it) => ({
         sale_id: created.id,
         product_id: it.product_id,
@@ -310,15 +263,11 @@ export default function Sales() {
         subtotal: Number(it.quantity) * Number(it.unit_price),
       }));
       const { error: itemErr } = await supabase.from('sale_items').insert(itemPayload);
-      if (itemErr) {
-        push('error', 'No se guardaron los productos');
-        setSaving(false);
-        return;
-      }
+      if (itemErr) { push('error', 'No se guardaron los productos'); setSaving(false); return; }
       push('success', 'Venta registrada');
       setModalOpen(false);
       setSaving(false);
-      load(); // refresh list in background
+      load();
       const customer = customers.find((c) => c.id === form.customer_id) ?? null;
       const row: SaleRow = { ...(created as Sale), customer };
       openReceipt(row);
@@ -339,12 +288,8 @@ export default function Sales() {
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const { error } = await supabase.from('sales').delete().eq('id', deleteTarget.id);
-    if (error) {
-      push('error', 'No se pudo eliminar la venta');
-    } else {
-      push('success', 'Venta eliminada');
-      load();
-    }
+    if (error) { push('error', 'No se pudo eliminar la venta'); }
+    else { push('success', 'Venta eliminada'); load(); }
     setDeleteTarget(null);
   };
 
@@ -453,19 +398,10 @@ export default function Sales() {
                     </td>
                     <td className="table-cell text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => openReceipt(s)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
-                          aria-label="Ver ticket"
-                          title="Ver ticket"
-                        >
+                        <button onClick={() => openReceipt(s)} className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition" aria-label="Ver ticket" title="Ver ticket">
                           <Receipt size={16} />
                         </button>
-                        <button
-                          onClick={() => openDetail(s)}
-                          className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition"
-                          aria-label="Ver detalle"
-                        >
+                        <button onClick={() => openDetail(s)} className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-600 transition" aria-label="Ver detalle">
                           <Eye size={16} />
                         </button>
                         {canEdit && (
@@ -505,9 +441,7 @@ export default function Sales() {
               <span className="font-bold text-ink-900 text-base">{formatCurrency(totals.total)}</span>
             </div>
             <div className="flex items-center gap-2">
-              <button className="btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>
-                Cancelar
-              </button>
+              <button className="btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>Cancelar</button>
               <button className="btn-primary" onClick={save} disabled={saving}>
                 {saving ? 'Guardando…' : editing ? 'Guardar cambios' : 'Guardar venta'}
               </button>
@@ -519,132 +453,71 @@ export default function Sales() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="label">Cliente *</label>
-              <select
-                className="input"
-                value={form.customer_id}
-                onChange={(e) => setForm({ ...form, customer_id: e.target.value })}
-              >
+              <select className="input" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value })}>
                 <option value="">Selecciona…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                {customers.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
             </div>
             <div>
               <label className="label">Folio / Factura</label>
-              <input
-                className="input bg-ink-50 text-ink-600 cursor-not-allowed font-mono"
-                value={form.invoice_number}
-                readOnly
-                placeholder="Se genera automáticamente"
-              />
+              <input className="input bg-ink-50 text-ink-600 cursor-not-allowed font-mono" value={form.invoice_number} readOnly placeholder="Se genera automáticamente" />
               <p className="text-[10px] text-ink-400 mt-1">Se asigna automáticamente al crear la venta.</p>
             </div>
             <div>
               <label className="label">Fecha</label>
-              <input
-                className="input"
-                type="date"
-                value={form.sale_date}
-                onChange={(e) => setForm({ ...form, sale_date: e.target.value })}
-              />
+              <input className="input" type="date" value={form.sale_date} onChange={(e) => setForm({ ...form, sale_date: e.target.value })} />
             </div>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="label !mb-0">Productos</label>
-              <button className="btn-ghost text-xs" onClick={addItem}>
-                <Plus size={14} /> Agregar línea
-              </button>
+              <button className="btn-ghost text-xs" onClick={addItem}><Plus size={14} /> Agregar línea</button>
             </div>
             <div className="space-y-2">
               {items.map((it) => {
                 const product = products.find((p) => p.id === it.product_id);
                 const lineTotal = (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
-                // When editing, account for the original committed qty so the
-                // warning doesn't trigger falsely on unchanged lines.
                 const originalQty = editing
                   ? (originalItemsRef.current.find((o) => o.product_id === it.product_id)?.quantity ?? 0)
                   : 0;
                 const effectiveStock = product ? product.stock + originalQty : 0;
                 const insufficient = product && Number(it.quantity) > effectiveStock;
                 return (
-                  <div
-                    key={it.id}
-                    className={`rounded-lg border p-3 ${
-                      insufficient ? 'border-danger-200 bg-danger-50/40' : 'border-ink-200 bg-ink-50/40'
-                    }`}
-                  >
+                  <div key={it.id} className={`rounded-lg border p-3 ${insufficient ? 'border-danger-200 bg-danger-50/40' : 'border-ink-200 bg-ink-50/40'}`}>
                     <div className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="label">Producto</label>
-                        <select
-                          className="input"
-                          value={it.product_id}
-                          onChange={(e) => onProductChange(it.id, e.target.value)}
-                        >
+                        <select className="input" value={it.product_id} onChange={(e) => onProductChange(it.id, e.target.value)}>
                           <option value="">Selecciona producto…</option>
                           {products.map((p) => {
-                            const origQty = editing
-                              ? (originalItemsRef.current.find((o) => o.product_id === p.id)?.quantity ?? 0)
-                              : 0;
+                            const origQty = editing ? (originalItemsRef.current.find((o) => o.product_id === p.id)?.quantity ?? 0) : 0;
                             const availableStock = p.stock + origQty;
-                            return (
-                              <option key={p.id} value={p.id} disabled={availableStock <= 0}>
-                                {p.name} ({p.sku}) — stock {availableStock}
-                              </option>
-                            );
+                            return (<option key={p.id} value={p.id} disabled={availableStock <= 0}>{p.name} ({p.sku}) — stock {availableStock}</option>);
                           })}
                         </select>
                       </div>
                       <div className="col-span-5 sm:col-span-2">
                         <label className="label">Cantidad</label>
-                        <input
-                          className="input"
-                          type="number"
-                          step="0.001"
-                          min="0"
-                          value={it.quantity}
-                          onChange={(e) => updateItem(it.id, { quantity: e.target.value })}
-                          placeholder="0"
-                        />
+                        <input className="input" type="number" step="0.001" min="0" value={it.quantity} onChange={(e) => updateItem(it.id, { quantity: e.target.value })} placeholder="0" />
                       </div>
                       <div className="col-span-5 sm:col-span-2">
                         <label className="label">Precio unit.</label>
-                        <input
-                          className="input"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={it.unit_price}
-                          onChange={(e) => updateItem(it.id, { unit_price: e.target.value })}
-                          placeholder="0.00"
-                        />
+                        <input className="input" type="number" step="0.01" min="0" value={it.unit_price} onChange={(e) => updateItem(it.id, { unit_price: e.target.value })} placeholder="0.00" />
                       </div>
                       <div className="col-span-2 sm:col-span-2">
                         <label className="label">Subtotal</label>
-                        <div className="text-right text-sm font-semibold text-ink-900 pt-2">
-                          {formatCurrency(lineTotal)}
-                        </div>
+                        <div className="text-right text-sm font-semibold text-ink-900 pt-2">{formatCurrency(lineTotal)}</div>
                       </div>
                       <div className="col-span-12 sm:col-span-1 flex justify-end">
-                        <button
-                          onClick={() => removeItem(it.id)}
-                          className="rounded-lg p-1.5 text-ink-400 hover:bg-danger-50 hover:text-danger-600 transition"
-                          aria-label="Quitar"
-                        >
+                        <button onClick={() => removeItem(it.id)} className="rounded-lg p-1.5 text-ink-400 hover:bg-danger-50 hover:text-danger-600 transition" aria-label="Quitar">
                           <X size={16} />
                         </button>
                       </div>
                     </div>
                     {product && (
                       <div className={`mt-1.5 text-xs pl-1 ${insufficient ? 'text-danger-600' : 'text-ink-500'}`}>
-                        {insufficient
-                          ? `Stock insuficiente (disponible: ${effectiveStock} ${product.unit})`
-                          : `Stock disponible: ${effectiveStock} ${product.unit}`}
+                        {insufficient ? `Stock insuficiente (disponible: ${effectiveStock} ${product.unit})` : `Stock disponible: ${effectiveStock} ${product.unit}`}
                       </div>
                     )}
                   </div>
@@ -659,13 +532,7 @@ export default function Sales() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Notas</label>
-              <textarea
-                className="input"
-                rows={2}
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Notas internas (opcional)"
-              />
+              <textarea className="input" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Notas internas (opcional)" />
             </div>
             <div className="rounded-lg bg-ink-50 p-4 space-y-1.5">
               <div className="flex justify-between text-sm">
@@ -685,12 +552,7 @@ export default function Sales() {
 
           <div className="rounded-lg border border-ink-200 p-4">
             <label className="inline-flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.has_tax}
-                onChange={(e) => setForm({ ...form, has_tax: e.target.checked })}
-                className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-200"
-              />
+              <input type="checkbox" checked={form.has_tax} onChange={(e) => setForm({ ...form, has_tax: e.target.checked })} className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-200" />
               <span className="text-sm text-ink-700">Aplicar IVA (16%)</span>
             </label>
             {!form.has_tax && (
@@ -700,37 +562,18 @@ export default function Sales() {
         </div>
       </Modal>
 
-      <Modal
-        open={!!detailOpen}
-        onClose={() => setDetailOpen(null)}
-        title={`Venta · ${detailOpen?.invoice_number ?? 'Sin folio'}`}
-        description={detailOpen?.customer?.name}
-        size="lg"
-      >
+      <Modal open={!!detailOpen} onClose={() => setDetailOpen(null)} title={`Venta · ${detailOpen?.invoice_number ?? 'Sin folio'}`} description={detailOpen?.customer?.name} size="lg">
         {detailOpen && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div>
-                <p className="text-xs text-ink-500 uppercase font-semibold">Fecha</p>
-                <p className="font-medium text-ink-800">{formatDate(detailOpen.sale_date)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-ink-500 uppercase font-semibold">Estado</p>
-                <Badge variant={detailOpen.status === 'confirmada' ? 'success' : 'neutral'}>{detailOpen.status}</Badge>
-              </div>
-              <div>
-                <p className="text-xs text-ink-500 uppercase font-semibold">Subtotal</p>
-                <p className="font-medium text-ink-800">{formatCurrency(detailOpen.subtotal)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-ink-500 uppercase font-semibold">Impuesto</p>
-                <p className="font-medium text-ink-800">{formatCurrency(detailOpen.tax)}</p>
-              </div>
+              <div><p className="text-xs text-ink-500 uppercase font-semibold">Fecha</p><p className="font-medium text-ink-800">{formatDate(detailOpen.sale_date)}</p></div>
+              <div><p className="text-xs text-ink-500 uppercase font-semibold">Estado</p><Badge variant={detailOpen.status === 'confirmada' ? 'success' : 'neutral'}>{detailOpen.status}</Badge></div>
+              <div><p className="text-xs text-ink-500 uppercase font-semibold">Subtotal</p><p className="font-medium text-ink-800">{formatCurrency(detailOpen.subtotal)}</p></div>
+              <div><p className="text-xs text-ink-500 uppercase font-semibold">Impuesto</p><p className="font-medium text-ink-800">{formatCurrency(detailOpen.tax)}</p></div>
             </div>
             {detailOpen.notes && (
               <div className="rounded-lg bg-ink-50 p-3 text-sm text-ink-600">
-                <p className="text-xs text-ink-500 uppercase font-semibold mb-1">Notas</p>
-                {detailOpen.notes}
+                <p className="text-xs text-ink-500 uppercase font-semibold mb-1">Notas</p>{detailOpen.notes}
               </div>
             )}
             <div className="border border-ink-100 rounded-lg overflow-hidden">
@@ -745,19 +588,11 @@ export default function Sales() {
                 </thead>
                 <tbody className="divide-y divide-ink-100">
                   {detailItems.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-4 py-6 text-center text-ink-400">
-                        <Package size={20} className="mx-auto mb-2" />
-                        Sin productos
-                      </td>
-                    </tr>
+                    <tr><td colSpan={4} className="px-4 py-6 text-center text-ink-400"><Package size={20} className="mx-auto mb-2" />Sin productos</td></tr>
                   ) : (
                     detailItems.map((it) => (
                       <tr key={it.id}>
-                        <td className="table-cell font-medium text-ink-800">
-                          {it.product?.name ?? 'Producto eliminado'}
-                          <div className="text-xs text-ink-500">{it.product?.sku}</div>
-                        </td>
+                        <td className="table-cell font-medium text-ink-800">{it.product?.name ?? 'Producto eliminado'}<div className="text-xs text-ink-500">{it.product?.sku}</div></td>
                         <td className="table-cell text-right">{it.quantity}</td>
                         <td className="table-cell text-right">{formatCurrency(it.unit_price)}</td>
                         <td className="table-cell text-right font-semibold">{formatCurrency(it.subtotal)}</td>
@@ -767,12 +602,8 @@ export default function Sales() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-ink-50/60">
-                    <td colSpan={3} className="table-cell text-right font-semibold">
-                      Total
-                    </td>
-                    <td className="table-cell text-right font-bold text-ink-900">
-                      {formatCurrency(detailOpen.total)}
-                    </td>
+                    <td colSpan={3} className="table-cell text-right font-semibold">Total</td>
+                    <td className="table-cell text-right font-bold text-ink-900">{formatCurrency(detailOpen.total)}</td>
                   </tr>
                 </tfoot>
               </table>
