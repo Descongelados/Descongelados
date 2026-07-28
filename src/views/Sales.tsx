@@ -32,8 +32,6 @@ type ItemRow = {
   unit_price: string;
 };
 
-const TAX_RATE = 0.16;
-
 function getWeekRange(): { monday: Date; sunday: Date } {
   const now = new Date();
   const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
@@ -69,7 +67,6 @@ export default function Sales() {
     sale_date: toDateInputValue(new Date()),
     notes: '',
     status: 'confirmada',
-    has_tax: true,
   });
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -127,9 +124,8 @@ export default function Sales() {
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
-    const tax = form.has_tax ? subtotal * TAX_RATE : 0;
-    return { subtotal, tax, total: subtotal + tax };
-  }, [items, form.has_tax]);
+    return { subtotal, tax: 0, total: subtotal };
+  }, [items]);
 
   const openCreate = async () => {
     setEditing(null);
@@ -139,7 +135,6 @@ export default function Sales() {
       sale_date: toDateInputValue(new Date()),
       notes: '',
       status: 'confirmada',
-      has_tax: true,
     });
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }]);
     setModalOpen(true);
@@ -157,7 +152,6 @@ export default function Sales() {
       sale_date: toDateInputValue(s.sale_date),
       notes: s.notes ?? '',
       status: s.status,
-      has_tax: Number(s.tax) > 0,
     });
     setItems(
       (existingItems ?? []).map((it) => ({
@@ -375,7 +369,6 @@ export default function Sales() {
                   <th className="table-head">Cliente</th>
                   <th className="table-head">Fecha</th>
                   <th className="table-head text-right">Subtotal</th>
-                  <th className="table-head text-right">Impuesto</th>
                   <th className="table-head text-right">Total</th>
                   <th className="table-head">Estado</th>
                   <th className="table-head text-right">Acciones</th>
@@ -388,7 +381,6 @@ export default function Sales() {
                     <td className="table-cell font-semibold text-ink-900">{s.customer?.name ?? '—'}</td>
                     <td className="table-cell">{formatDate(s.sale_date)}</td>
                     <td className="table-cell text-right">{formatCurrency(s.subtotal)}</td>
-                    <td className="table-cell text-right">{formatCurrency(s.tax)}</td>
                     <td className="table-cell text-right font-semibold">{formatCurrency(s.total)}</td>
                     <td className="table-cell">
                       <Badge variant={s.status === 'confirmada' ? 'success' : 'neutral'}>{s.status}</Badge>
@@ -598,30 +590,11 @@ export default function Sales() {
                 <span className="text-ink-500">Subtotal</span>
                 <span className="font-medium text-ink-800">{formatCurrency(totals.subtotal)}</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-500">Impuesto {form.has_tax ? '(16%)' : '(0%)'}</span>
-                <span className="font-medium text-ink-800">{formatCurrency(totals.tax)}</span>
-              </div>
               <div className="flex justify-between pt-1.5 border-t border-ink-200">
                 <span className="font-semibold text-ink-900">Total</span>
                 <span className="font-bold text-ink-900 text-base">{formatCurrency(totals.total)}</span>
               </div>
             </div>
-          </div>
-
-          <div className="rounded-lg border border-ink-200 p-4">
-            <label className="inline-flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.has_tax}
-                onChange={(e) => setForm({ ...form, has_tax: e.target.checked })}
-                className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-200"
-              />
-              <span className="text-sm text-ink-700">Aplicar IVA (16%)</span>
-            </label>
-            {!form.has_tax && (
-              <p className="text-xs text-ink-500 mt-1.5">La venta se registrará sin impuestos. El total será igual al subtotal.</p>
-            )}
           </div>
         </div>
       </Modal>
@@ -645,12 +618,8 @@ export default function Sales() {
                 <Badge variant={detailOpen.status === 'confirmada' ? 'success' : 'neutral'}>{detailOpen.status}</Badge>
               </div>
               <div>
-                <p className="text-xs text-ink-500 uppercase font-semibold">Subtotal</p>
-                <p className="font-medium text-ink-800">{formatCurrency(detailOpen.subtotal)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-ink-500 uppercase font-semibold">Impuesto</p>
-                <p className="font-medium text-ink-800">{formatCurrency(detailOpen.tax)}</p>
+                <p className="text-xs text-ink-500 uppercase font-semibold">Total</p>
+                <p className="font-medium text-ink-800">{formatCurrency(detailOpen.total)}</p>
               </div>
             </div>
             {detailOpen.notes && (
