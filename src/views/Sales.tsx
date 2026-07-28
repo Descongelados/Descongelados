@@ -154,13 +154,27 @@ export default function Sales() {
   };
 
   const openEdit = async (s: SaleRow) => {
-    setEditing(s);
-    const { data: existingItems } = await supabase.from('sale_items').select('*').eq('sale_id', s.id);
+    // Fetch items first, before touching any state, so React batches
+    // everything together and the modal opens with data already loaded.
+    const { data: existingItems, error: itemsError } = await supabase
+      .from('sale_items')
+      .select('*')
+      .eq('sale_id', s.id);
+
+    if (itemsError) {
+      push('error', 'No se pudieron cargar los productos de la venta');
+      return;
+    }
+
+    const rows = existingItems ?? [];
+
     // Store original committed quantities so save() can compute effective stock
-    originalItemsRef.current = (existingItems ?? []).map((it) => ({
+    originalItemsRef.current = rows.map((it) => ({
       product_id: it.product_id,
       quantity: Number(it.quantity),
     }));
+
+    setEditing(s);
     setForm({
       customer_id: s.customer_id,
       invoice_number: s.invoice_number ?? '',
@@ -170,12 +184,14 @@ export default function Sales() {
       has_tax: Number(s.tax) > 0,
     });
     setItems(
-      (existingItems ?? []).map((it) => ({
-        id: it.id,
-        product_id: it.product_id,
-        quantity: String(it.quantity),
-        unit_price: String(it.unit_price),
-      })),
+      rows.length > 0
+        ? rows.map((it) => ({
+            id: it.id,
+            product_id: it.product_id,
+            quantity: String(it.quantity),
+            unit_price: String(it.unit_price),
+          }))
+        : [{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_price: '0' }],
     );
     setModalOpen(true);
   };
