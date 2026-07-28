@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   TrendingUp,
   Plus,
@@ -31,6 +31,103 @@ type ItemRow = {
   quantity: string;
   unit_price: string;
 };
+
+// ── Combobox genérico ──────────────────────────────────────────────────────────
+type ComboboxOption = { value: string; label: string; sub?: string; disabled?: boolean };
+
+function Combobox({
+  options,
+  value,
+  onChange,
+  placeholder = 'Buscar…',
+}: {
+  options: ComboboxOption[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const selected = options.find((o) => o.value === value);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // cierra al hacer clic fuera
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    return q ? options.filter((o) => o.label.toLowerCase().includes(q) || o.sub?.toLowerCase().includes(q)) : options;
+  }, [options, query]);
+
+  const handleSelect = (opt: ComboboxOption) => {
+    if (opt.disabled) return;
+    onChange(opt.value);
+    setQuery('');
+    setOpen(false);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        className="input flex items-center justify-between gap-2 cursor-pointer select-none"
+        onClick={() => { setQuery(''); setOpen((o) => !o); }}
+      >
+        <span className={selected ? 'text-ink-900' : 'text-ink-400'}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <svg className="w-4 h-4 text-ink-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </div>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-ink-200 bg-white shadow-lg">
+          <div className="p-2 border-b border-ink-100">
+            <input
+              autoFocus
+              className="w-full rounded-md border border-ink-200 px-3 py-1.5 text-sm outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
+              placeholder="Escribir para filtrar…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setOpen(false);
+                if (e.key === 'Enter' && filtered.length > 0) handleSelect(filtered[0]);
+              }}
+            />
+          </div>
+          <ul className="max-h-56 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <li className="px-4 py-2 text-sm text-ink-400">Sin resultados</li>
+            ) : (
+              filtered.map((opt) => (
+                <li
+                  key={opt.value}
+                  onClick={() => handleSelect(opt)}
+                  className={`px-4 py-2 text-sm cursor-pointer flex flex-col ${
+                    opt.disabled
+                      ? 'text-ink-300 cursor-not-allowed'
+                      : opt.value === value
+                      ? 'bg-brand-50 text-brand-700 font-medium'
+                      : 'text-ink-800 hover:bg-ink-50'
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                  {opt.sub && <span className="text-xs text-ink-400">{opt.sub}</span>}
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+// ──────────────────────────────────────────────────────────────────────────────
 
 function getWeekRange(): { monday: Date; sunday: Date } {
   const now = new Date();
@@ -449,18 +546,12 @@ export default function Sales() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="label">Cliente *</label>
-              <select
-                className="input"
+              <Combobox
+                placeholder="Buscar cliente…"
                 value={form.customer_id}
-                onChange={(e) => setForm({ ...form, customer_id: e.target.value })}
-              >
-                <option value="">Selecciona…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setForm({ ...form, customer_id: v })}
+                options={customers.map((c) => ({ value: c.id, label: c.name, sub: c.phone ?? undefined }))}
+              />
             </div>
             <div>
               <label className="label">Folio / Factura</label>
@@ -505,18 +596,17 @@ export default function Sales() {
                     <div className="grid grid-cols-12 gap-2 items-end">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="label">Producto</label>
-                        <select
-                          className="input"
+                        <Combobox
+                          placeholder="Buscar producto…"
                           value={it.product_id}
-                          onChange={(e) => onProductChange(it.id, e.target.value)}
-                        >
-                          <option value="">Selecciona producto…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id} disabled={p.stock <= 0}>
-                              {p.name} ({p.sku}) — stock {p.stock}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(v) => onProductChange(it.id, v)}
+                          options={products.map((p) => ({
+                            value: p.id,
+                            label: p.name,
+                            sub: `${p.sku} — stock ${p.stock}`,
+                            disabled: p.stock <= 0,
+                          }))}
+                        />
                       </div>
                       <div className="col-span-5 sm:col-span-2">
                         <label className="label">Cantidad</label>
