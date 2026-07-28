@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   TrendingUp,
   Plus,
@@ -62,6 +62,10 @@ export default function Sales() {
   const [detailItems, setDetailItems] = useState<(SaleItem & { product: Product | null })[]>([]);
   const [editing, setEditing] = useState<Sale | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SaleRow | null>(null);
+
+  // Keeps track of the original committed quantities when editing a sale so
+  // the stock check can add them back (they are already discounted from stock).
+  const originalItemsRef = useRef<{ product_id: string; quantity: number }[]>([]);
 
   const [form, setForm] = useState({
     customer_id: '',
@@ -133,6 +137,7 @@ export default function Sales() {
 
   const openCreate = async () => {
     setEditing(null);
+    originalItemsRef.current = [];
     setForm({
       customer_id: customers[0]?.id ?? '',
       invoice_number: '',
@@ -151,6 +156,11 @@ export default function Sales() {
   const openEdit = async (s: SaleRow) => {
     setEditing(s);
     const { data: existingItems } = await supabase.from('sale_items').select('*').eq('sale_id', s.id);
+    // Store original committed quantities so save() can compute effective stock
+    originalItemsRef.current = (existingItems ?? []).map((it) => ({
+      product_id: it.product_id,
+      quantity: Number(it.quantity),
+    }));
     setForm({
       customer_id: s.customer_id,
       invoice_number: s.invoice_number ?? '',
@@ -195,9 +205,18 @@ export default function Sales() {
     }
     for (const it of validItems) {
       const product = products.find((p) => p.id === it.product_id);
-      if (product && Number(it.quantity) > product.stock) {
-        push('error', `Stock insuficiente para ${product.name} (disponible: ${product.stock})`);
-        return;
+      if (product) {
+        // When editing, the stock shown is already after the original sale was
+        // committed. Add back the originally committed quantity so we validate
+        // against the true available stock for this edit.
+        const originalQty = editing
+          ? (originalItemsRef.current.find((o) => o.product_id === it.product_id)?.quantity ?? 0)
+          : 0;
+        const effectiveStock = product.stock + originalQty;
+        if (Number(it.quantity) > effectiveStock) {
+          push('error', `Stock insuficiente para ${product.name} (disponible: ${effectiveStock})`);
+          return;
+        }
       }
     }
     setSaving(true);
@@ -434,7 +453,11 @@ export default function Sales() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title={editing ? 'Editar venta' : 'Nueva venta'}
-        description="Los productos se descuentan del inventario al guardar."
+        description={
+          editing
+            ? `Folio ${editing.invoice_number ?? 'sin folio'} · modifica productos y totales`
+            : 'Los productos se descuentan del inventario al guardar.'
+        }
         size="xl"
         footer={
           <div className="flex items-center justify-between w-full">
@@ -447,7 +470,7 @@ export default function Sales() {
                 Cancelar
               </button>
               <button className="btn-primary" onClick={save} disabled={saving}>
-                {saving ? 'Guardando…' : 'Guardar venta'}
+                {saving ? 'Guardando…' : editing ? 'Guardar cambios' : 'Guardar venta'}
               </button>
             </div>
           </div>
@@ -502,7 +525,13 @@ export default function Sales() {
               {items.map((it) => {
                 const product = products.find((p) => p.id === it.product_id);
                 const lineTotal = (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
-                const insufficient = product && Number(it.quantity) > product.stock;
+                // When editing, account for the original committed qty so the
+                // warning doesn't trigger falsely on unchanged lines.
+                const originalQty = editing
+                  ? (originalItemsRef.current.find((o) => o.product_id === it.product_id)?.quantity ?? 0)
+                  : 0;
+                const effectiveStock = product ? product.stock + originalQty : 0;
+                const insufficient = product && Number(it.quantity) > effectiveStock;
                 return (
                   <div
                     key={it.id}
@@ -519,11 +548,17 @@ export default function Sales() {
                           onChange={(e) => onProductChange(it.id, e.target.value)}
                         >
                           <option value="">Selecciona producto…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id} disabled={p.stock <= 0}>
-                              {p.name} ({p.sku}) — stock {p.stock}
-                            </option>
-                          ))}
+                          {products.map((p) => {
+                            const origQty = editing
+                              ? (originalItemsRef.current.find((o) => o.product_id === p.id)?.quantity ?? 0)
+                              : 0;
+                            const availableStock = p.stock + origQty;
+                            return (
+                              <option key={p.id} value={p.id} disabled={availableStock <= 0}>
+                                {p.name} ({p.sku}) — stock {availableStock}
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
                       <div className="col-span-5 sm:col-span-2">
@@ -569,8 +604,8 @@ export default function Sales() {
                     {product && (
                       <div className={`mt-1.5 text-xs pl-1 ${insufficient ? 'text-danger-600' : 'text-ink-500'}`}>
                         {insufficient
-                          ? `Stock insuficiente (disponible: ${product.stock} ${product.unit})`
-                          : `Stock disponible: ${product.stock} ${product.unit}`}
+                          ? `Stock insuficiente (disponible: ${effectiveStock} ${product.unit})`
+                          : `Stock disponible: ${effectiveStock} ${product.unit}`}
                       </div>
                     )}
                   </div>
