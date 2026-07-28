@@ -341,7 +341,7 @@ export default function Purchases() {
     [supPayments],
   );
 
-  const openCreate = () => {
+  const openCreate = async () => {
     setEditing(null);
     setForm({
       supplier_id: suppliers[0]?.id ?? '',
@@ -354,6 +354,9 @@ export default function Purchases() {
     setItems([{ id: crypto.randomUUID(), product_id: '', quantity: '1', unit_cost: '0' }]);
     setPayments({ efectivo: '0', banco: '0', por_pagar: String(totals.total || 0) });
     setModalOpen(true);
+    // Genera el folio consultando el máximo histórico en la BD
+    const { data } = await supabase.rpc('next_purchase_number');
+    if (data) setForm((prev) => ({ ...prev, invoice_number: data as string }));
   };
 
   const openEdit = async (p: PurchaseRow) => {
@@ -1149,11 +1152,12 @@ export default function Purchases() {
             <div>
               <label className="label">Folio / Factura</label>
               <input
-                className="input"
+                className="input bg-ink-50 text-ink-600 cursor-not-allowed font-mono"
                 value={form.invoice_number}
-                onChange={(e) => setForm({ ...form, invoice_number: e.target.value })}
-                placeholder="Ej. FAC-2026-001"
+                readOnly
+                placeholder="Se genera automáticamente"
               />
+              <p className="text-[10px] text-ink-400 mt-1">Se asigna automáticamente al crear la compra.</p>
             </div>
             <div>
               <label className="label">Fecha</label>
