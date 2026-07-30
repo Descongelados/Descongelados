@@ -12,20 +12,28 @@ type ReceiptItem = SaleItem & { product: Product | null };
 type Props = {
   sale: SaleRow | null;
   onClose: () => void;
+  /** Items precargados (evita re-consultar cuando se abre justo después de crear). */
+  initialItems?: ReceiptItem[];
 };
 
-export default function SaleReceiptModal({ sale, onClose }: Props) {
+export default function SaleReceiptModal({ sale, onClose, initialItems }: Props) {
   const { push } = useToast();
-  const [items, setItems] = useState<ReceiptItem[]>([]);
+  const [items, setItems] = useState<ReceiptItem[]>(initialItems ?? []);
   const receiptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!sale) { setItems([]); return; }
+    // Si se suministraron items precargados úsalos directamente sin ir a la BD.
+    if (initialItems && initialItems.length > 0) {
+      setItems(initialItems);
+      return;
+    }
     supabase
       .from('sale_items')
       .select('*, product:products(*)')
       .eq('sale_id', sale.id)
       .then(({ data }) => setItems((data as ReceiptItem[]) ?? []));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sale?.id]);
 
   const share = async () => {
