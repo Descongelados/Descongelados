@@ -31,6 +31,7 @@ type ItemRow = {
   quantity: string;
   unit_price: string;
 };
+type ReceiptItem = SaleItem & { product: Product | null };
 
 // ── Combobox genérico ──────────────────────────────────────────────────────────
 type ComboboxOption = { value: string; label: string; sub?: string; disabled?: boolean };
@@ -168,6 +169,7 @@ export default function Sales() {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
+  const [receiptItems, setReceiptItems] = useState<ReceiptItem[]>([]);
 
   const load = async () => {
     setLoading(true);
@@ -342,7 +344,10 @@ export default function Sales() {
         unit_price: Number(it.unit_price),
         subtotal: Number(it.quantity) * Number(it.unit_price),
       }));
-      const { error: itemErr } = await supabase.from('sale_items').insert(itemPayload);
+      const { data: insertedItems, error: itemErr } = await supabase
+        .from('sale_items')
+        .insert(itemPayload)
+        .select();
       if (itemErr) {
         push('error', 'No se guardaron los productos');
         setSaving(false);
@@ -354,11 +359,21 @@ export default function Sales() {
       load(); // refresh list in background
       const customer = customers.find((c) => c.id === form.customer_id) ?? null;
       const row: SaleRow = { ...(created as Sale), customer };
-      openReceipt(row);
+      // Construir los items con el objeto product completo para el recibo,
+      // usando los registros insertados (que tienen id de BD) y los productos en memoria.
+      const builtReceiptItems: ReceiptItem[] = (insertedItems ?? []).map((dbItem) => ({
+        ...(dbItem as SaleItem),
+        product: products.find((p) => p.id === dbItem.product_id) ?? null,
+      }));
+      setReceiptItems(builtReceiptItems);
+      setReceiptSale(row);
     }
   };
 
-  const openReceipt = (s: SaleRow) => setReceiptSale(s);
+  const openReceipt = (s: SaleRow) => {
+    setReceiptItems([]);
+    setReceiptSale(s);
+  };
 
   const openDetail = async (s: SaleRow) => {
     setDetailOpen(s);
@@ -766,7 +781,11 @@ export default function Sales() {
         )}
       </Modal>
 
-      <SaleReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />
+      <SaleReceiptModal
+        sale={receiptSale}
+        onClose={() => { setReceiptSale(null); setReceiptItems([]); }}
+        initialItems={receiptItems.length > 0 ? receiptItems : undefined}
+      />
 
       <ConfirmDialog
         open={!!deleteTarget}
