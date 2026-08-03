@@ -48,8 +48,8 @@ export default function Customers() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CustomerBalance | null>(null);
   const [detail, setDetail] = useState<CustomerBalance | null>(null);
-  const [detailSales, setDetailSales] = useState<Array<{ id: string; invoice_number: string | null; total: number; sale_date: string; status: string }>>([]);
-  const [detailCollections, setDetailCollections] = useState<Array<{ id: string; amount: number; collection_date: string; payment_method: string; reference: string | null }>>([]);
+  const [detailSales, setDetailSales] = useState<Array<{ id: string; invoice_number: string | null; total: number; sale_date: string; status: string; delivery_status: string }>>([]);
+  const [detailCollections, setDetailCollections] = useState<Array<{ id: string; amount: number; collection_date: string; payment_method: string; reference: string | null; sale_id: string | null }>>([]);
 
   const load = async () => {
     setLoading(true);
@@ -150,8 +150,8 @@ export default function Customers() {
   const openDetail = async (c: CustomerBalance) => {
     setDetail(c);
     const [salesRes, colRes] = await Promise.all([
-      supabase.from('sales').select('id, invoice_number, total, sale_date, status').eq('customer_id', c.id).order('sale_date', { ascending: false }).limit(10),
-      supabase.from('collections').select('id, amount, collection_date, payment_method, reference').eq('customer_id', c.id).order('collection_date', { ascending: false }).limit(10),
+      supabase.from('sales').select('id, invoice_number, total, sale_date, status, delivery_status').eq('customer_id', c.id).order('sale_date', { ascending: false }).limit(10),
+      supabase.from('collections').select('id, amount, collection_date, payment_method, reference, sale_id').eq('customer_id', c.id).order('collection_date', { ascending: false }).limit(10),
     ]);
     setDetailSales((salesRes.data as typeof detailSales) ?? []);
     setDetailCollections((colRes.data as typeof detailCollections) ?? []);
@@ -411,16 +411,30 @@ export default function Customers() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-ink-100">
-                      {detailSales.map((s) => (
+                      {detailSales.map((s) => {
+                        // cobro real = cobranzas de esta venta que NO sean por_pagar
+                        const realPaid = detailCollections
+                          .filter((c) => c.sale_id === s.id && c.payment_method !== 'por_pagar')
+                          .reduce((acc, c) => acc + c.amount, 0);
+                        const pendingCobro = s.delivery_status === 'entregado' && realPaid < s.total - 0.009;
+                        return (
                         <tr key={s.id}>
                           <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>
                           <td className="table-cell">{new Date(s.sale_date).toLocaleDateString('es-MX')}</td>
                           <td className="table-cell text-right font-semibold">{formatCurrency(s.total)}</td>
                           <td className="table-cell">
-                            <Badge variant={s.status === 'confirmada' ? 'success' : 'neutral'}>{s.status}</Badge>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Badge variant={s.status === 'confirmada' ? 'success' : 'neutral'}>{s.status}</Badge>
+                              {pendingCobro && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-warning-50 px-2 py-0.5 text-xs font-semibold text-warning-700 border border-warning-200">
+                                  cobro pendiente
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
