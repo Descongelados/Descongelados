@@ -173,17 +173,12 @@ export default function Sales() {
 
   const load = async () => {
     setLoading(true);
-    const { monday, sunday } = getWeekRange();
-    const mondayStr = monday.toISOString().slice(0, 10);
-    const sundayStr = `${sunday.toISOString().slice(0, 10)}T23:59:59`;
 
     const [sRes, cRes, prodRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
-        .gte('sale_date', mondayStr)
-        .lte('sale_date', sundayStr)
-        // Excluir ventas ya entregadas: esas pertenecen al módulo de Cobranza
+        // Mostrar todas las ventas pendientes de entrega sin importar la fecha
         .neq('delivery_status', 'entregado')
         .order('sale_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
@@ -216,7 +211,7 @@ export default function Sales() {
     );
   }, [sales, search]);
 
-  const totalWeek = useMemo(
+  const totalPending = useMemo(
     () => filtered.reduce((acc, s) => acc + s.total, 0),
     [filtered],
   );
@@ -417,8 +412,8 @@ export default function Sales() {
               <TrendingUp size={20} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalWeek)}</p>
-              <p className="text-sm text-ink-500">Total ventas esta semana</p>
+              <p className="text-2xl font-bold text-ink-900">{formatCurrency(totalPending)}</p>
+              <p className="text-sm text-ink-500">Total pendiente de entrega</p>
             </div>
           </div>
         </div>
