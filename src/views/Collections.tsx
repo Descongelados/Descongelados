@@ -175,7 +175,8 @@ export default function Collections({ onDataChanged }: Props) {
   const paidBySale = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of collections ?? []) {
-      if (c.sale_id) {
+      // 'por_pagar' es deuda registrada, no cobro real — no cuenta para el balance
+      if (c.sale_id && c.payment_method !== 'por_pagar') {
         map.set(c.sale_id, (map.get(c.sale_id) ?? 0) + c.amount);
       }
     }
