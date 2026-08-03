@@ -200,9 +200,10 @@ export default function Collections({ onDataChanged }: Props) {
     [salesWithBalance, weekStart, weekEnd],
   );
 
+  // Entregas pendientes: todas las fechas (no solo semana actual)
   const pendingDeliveries = useMemo(
-    () => salesWithBalanceWeek.filter((s) => s.delivery_status === 'pendiente'),
-    [salesWithBalanceWeek],
+    () => salesWithBalance.filter((s) => s.delivery_status === 'pendiente'),
+    [salesWithBalance],
   );
   const deliveredSalesWeek = useMemo(
     () => salesWithBalanceWeek.filter((s) => s.delivery_status === 'entregado'),
