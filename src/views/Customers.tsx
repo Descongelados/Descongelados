@@ -93,7 +93,7 @@ export default function Customers() {
       tax_id: c.tax_id ?? '',
       phone: c.phone ?? '',
       email: c.email ?? '',
-      address: '',
+      address: c.address ?? '',
       city: c.city ?? '',
       credit_limit: String(c.credit_limit),
     });

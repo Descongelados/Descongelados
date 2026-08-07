@@ -124,6 +124,7 @@ export type CustomerBalance = {
   tax_id: string | null;
   phone: string | null;
   email: string | null;
+  address: string | null;
   city: string | null;
   credit_limit: number;
   total_purchased: number;
@@ -137,6 +138,7 @@ export type SupplierBalance = {
   tax_id: string | null;
   phone: string | null;
   email: string | null;
+  address: string | null;
   city: string | null;
   contact: string | null;
   total_purchased: number;

@@ -93,7 +93,7 @@ export default function Suppliers() {
       tax_id: s.tax_id ?? '',
       phone: s.phone ?? '',
       email: s.email ?? '',
-      address: '',
+      address: s.address ?? '',
       city: s.city ?? '',
       contact: s.contact ?? '',
     });
