@@ -117,16 +117,24 @@ export default function Customers() {
     };
     if (editing) {
       const { error } = await supabase.from('customers').update(payload).eq('id', editing.id);
-      if (error) push('error', 'No se pudo actualizar el cliente');
-      else {
+      if (error) {
+        const msg = error.message?.toLowerCase().includes('email') ? 'El email ya está registrado'
+          : error.message?.toLowerCase().includes('unique') ? 'Ya existe un cliente con esos datos'
+          : 'No se pudo actualizar el cliente';
+        push('error', msg);
+      } else {
         push('success', 'Cliente actualizado');
         setModalOpen(false);
         load();
       }
     } else {
       const { error } = await supabase.from('customers').insert(payload);
-      if (error) push('error', 'No se pudo crear el cliente');
-      else {
+      if (error) {
+        const msg = error.message?.toLowerCase().includes('email') ? 'El email ya está registrado'
+          : error.message?.toLowerCase().includes('unique') ? 'Ya existe un cliente con esos datos'
+          : 'No se pudo crear el cliente';
+        push('error', msg);
+      } else {
         push('success', 'Cliente creado');
         setModalOpen(false);
         load();

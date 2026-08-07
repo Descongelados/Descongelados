@@ -185,19 +185,24 @@ export default function SettingsView() {
     await refreshUsers();
   };
 
+  const [deletingUser, setDeletingUser] = useState(false);
+
   const confirmDeleteUser = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deletingUser) return;
     if (deleteTarget.id === currentUser?.id) { push('error', 'No puedes eliminar tu propio usuario'); setDeleteTarget(null); return; }
+    setDeletingUser(true);
     const { error } = await supabase.from('app_users').delete().eq('id', deleteTarget.id);
     if (error) { push('error', 'Error al eliminar usuario'); }
     else push('success', 'Usuario eliminado');
+    setDeletingUser(false);
     setDeleteTarget(null);
     await refreshUsers();
   };
 
   const toggleActive = async (u: AppUser) => {
     if (u.id === currentUser?.id) { push('error', 'No puedes desactivarte a ti mismo'); return; }
-    await supabase.from('app_users').update({ active: !u.active }).eq('id', u.id);
+    const { error } = await supabase.from('app_users').update({ active: !u.active }).eq('id', u.id);
+    if (error) { push('error', 'No se pudo cambiar el estado del usuario'); return; }
     await refreshUsers();
   };
 

@@ -229,7 +229,7 @@ export default function Reports() {
     });
 
   const runReport = async () => {
-    if (!from || !to) return;
+    if (loading || !from || !to) return;
     setLoading(true);
     setError(null);
     setReportData(null);

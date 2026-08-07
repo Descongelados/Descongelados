@@ -470,7 +470,10 @@ export default function Purchases() {
         p_payments:       paymentsPayload,
       });
       if (error) {
-        push('error', 'No se pudo actualizar la compra');
+        const msg = error.message?.toLowerCase().includes('stock') ? error.message
+          : error.message?.toLowerCase().includes('saldo') ? error.message
+          : 'No se pudo actualizar la compra';
+        push('error', msg);
         setSaving(false);
         return;
       }
@@ -507,6 +510,11 @@ export default function Purchases() {
       supabase.from('purchase_items').select('id, product_id, quantity, unit_cost, subtotal, product:products(id, sku, name, cost_price, unit)').eq('purchase_id', p.id),
       supabase.from('supplier_payments').select('amount, payment_method, payment_date').eq('purchase_id', p.id),
     ]);
+    if (itemsRes.error || paysRes.error) {
+      push('error', 'No se pudieron cargar los detalles de la compra');
+      setDetailOpen(null);
+      return;
+    }
     setDetailItems((itemsRes.data as (PurchaseItem & { product: Product | null })[]) ?? []);
     setDetailPayments((paysRes.data as Array<{ amount: number; payment_method: string; payment_date: string }>) ?? []);
   };

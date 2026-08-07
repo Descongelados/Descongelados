@@ -108,7 +108,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (data) {
             setCurrentUser({ ...data, roles: data.roles as Role[] });
           } else {
+            // Usuario no encontrado o desactivado — limpiar sesión
             localStorage.removeItem(SESSION_KEY);
+            localStorage.setItem('session_expired', '1');
           }
         }
       } catch {

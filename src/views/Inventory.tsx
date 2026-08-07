@@ -439,6 +439,7 @@ export default function Inventory() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState<Tab>('list');
 
   const load = async () => {
@@ -573,7 +574,7 @@ export default function Inventory() {
         if (error && error.message.includes('duplicate')) {
           attempt += 1;
           if (attempt >= 3) {
-            push('error', 'No se pudo generar un SKU único. Inténtalo de nuevo.');
+            push('error', 'El SKU ya existe. Cambia el nombre o edita el SKU manualmente.');
             break;
           }
           const nextSku = await generateNextSku();
@@ -604,7 +605,8 @@ export default function Inventory() {
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
     const { error } = await supabase.from('products').delete().eq('id', deleteTarget.id);
     if (error) {
       push('error', 'No se pudo eliminar (puede estar referenciado en compras/ventas)');
@@ -623,6 +625,7 @@ export default function Inventory() {
       push('success', 'Producto eliminado');
       load();
     }
+    setDeleting(false);
     setDeleteTarget(null);
   };
 

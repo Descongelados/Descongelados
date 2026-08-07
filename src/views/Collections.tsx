@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Truck,
   Wallet,
@@ -96,6 +96,8 @@ export default function Collections({ onDataChanged }: Props) {
   const canEdit = can('collections:edit');
   const { push } = useToast();
   const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas'>('entregas');
+  // taxRateRef: cargado desde app_settings en load() para no usar el 16% hardcodeado
+  const taxRateRef = useRef(0.16);
   const [sales, setSales] = useState<SaleRow[] | null>(null);
   const [collections, setCollections] = useState<CollectionRow[] | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -126,7 +128,7 @@ export default function Collections({ onDataChanged }: Props) {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
 
-    const [sRes, cRes, custRes, prodRes] = await Promise.all([
+    const [sRes, cRes, custRes, prodRes, taxRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
@@ -140,6 +142,7 @@ export default function Collections({ onDataChanged }: Props) {
         .order('collection_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
       supabase.from('products').select('id, name, cost_price, price').order('name'),
+      supabase.from('app_settings').select('value').eq('key', 'tax_rate').maybeSingle(),
     ]);
     if (sRes.error) {
       push('error', 'No se pudieron cargar las ventas');
@@ -153,8 +156,16 @@ export default function Collections({ onDataChanged }: Props) {
     } else {
       setCollections(cRes.data as CollectionRow[]);
     }
-    if (!custRes.error) setCustomers(custRes.data as Customer[]);
-    if (!prodRes.error) setProducts((prodRes.data ?? []) as { id: string; name: string; cost_price: number; price: number }[]);
+    if (custRes.error) push('error', 'No se pudieron cargar los clientes');
+    else setCustomers(custRes.data as Customer[]);
+    if (prodRes.error) push('error', 'No se pudieron cargar los productos');
+    else setProducts((prodRes.data ?? []) as { id: string; name: string; cost_price: number; price: number }[]);
+    // Cargar tax rate desde BD
+    if (!taxRes.error && taxRes.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rate = Number((taxRes.data.value as any)?.rate);
+      if (rate > 0) taxRateRef.current = rate;
+    }
     setLoading(false);
   };
 
@@ -480,7 +491,7 @@ export default function Collections({ onDataChanged }: Props) {
     }
 
     const subtotal = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
-    const tax = editSaleForm.apply_tax ? subtotal * 0.16 : 0;
+    const tax = editSaleForm.apply_tax ? subtotal * taxRateRef.current : 0;
     const total = subtotal + tax;
 
     // Update parent sale
@@ -499,7 +510,12 @@ export default function Collections({ onDataChanged }: Props) {
     }
 
     // Delete existing items and re-insert
-    await supabase.from('sale_items').delete().eq('sale_id', editSaleForm.sale_id);
+    const { error: deleteErr } = await supabase.from('sale_items').delete().eq('sale_id', editSaleForm.sale_id);
+    if (deleteErr) {
+      push('error', 'No se pudieron actualizar los productos de la venta');
+      setSavingSale(false);
+      return;
+    }
 
     const newItems = items.map((it) => ({
       sale_id: editSaleForm.sale_id,

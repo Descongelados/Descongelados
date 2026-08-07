@@ -175,7 +175,7 @@ function Dashboard({ onNavigate }, ref) {
       supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
     ]);
 
-    if (kpisRes.error || lowStockRes.error) {
+    if (kpisRes.error || recentSalesRes.error || lowStockRes.error) {
       setError('No se pudieron cargar las métricas');
       return;
     }
