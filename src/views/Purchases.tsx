@@ -414,6 +414,7 @@ export default function Purchases() {
   };
 
   const save = async () => {
+    if (saving) return;
     if (!form.supplier_id) {
       push('error', 'Selecciona un proveedor');
       return;
@@ -1107,7 +1108,7 @@ export default function Purchases() {
       {/* Purchase create/edit modal */}
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditing(null); setForm({ supplier_id: '', invoice_number: '', purchase_date: toDateInputValue(new Date()), notes: '', status: 'confirmada', has_tax: true }); setItems([]); setPayments(emptyPayments); }}
         title={editing ? 'Editar compra' : 'Nueva compra'}
         description="Los productos se agregan al inventario al guardar."
         size="xl"

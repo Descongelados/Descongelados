@@ -263,7 +263,7 @@ export default function Suppliers() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditing(null); setForm(emptyForm); }}
         title={editing ? 'Editar proveedor' : 'Nuevo proveedor'}
         size="lg"
         footer={

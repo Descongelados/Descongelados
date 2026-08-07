@@ -78,6 +78,7 @@ export default function SettingsView() {
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [userForm, setUserForm] = useState<UserForm>(emptyUserForm());
   const [showPassword, setShowPassword] = useState(false);
+  const [savingUser, setSavingUser] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
 
   const refreshUsers = async () => {
@@ -115,6 +116,7 @@ export default function SettingsView() {
   };
 
   const saveUser = async () => {
+    if (savingUser) return;
     if (!userForm.name.trim()) { push('error', 'El nombre es obligatorio'); return; }
     if (!userForm.username.trim()) { push('error', 'El usuario es obligatorio'); return; }
     if (!editingUser && !userForm.password.trim()) { push('error', 'La contraseña es obligatoria'); return; }
@@ -128,6 +130,7 @@ export default function SettingsView() {
     );
     if (duplicate) { push('error', 'Ese nombre de usuario ya existe'); return; }
 
+    setSavingUser(true);
     if (editingUser) {
       // Actualizar datos sin tocar el password
       const { error } = await supabase.from('app_users').update({
@@ -136,7 +139,7 @@ export default function SettingsView() {
         roles:    userForm.roles,
         active:   userForm.active,
       }).eq('id', editingUser.id);
-      if (error) { push('error', 'Error al actualizar usuario'); return; }
+      if (error) { setSavingUser(false); push('error', 'Error al actualizar usuario'); return; }
 
       // Si el admin escribió una nueva contraseña, actualizarla vía RPC (hashea en BD)
       if (userForm.password.trim()) {
@@ -144,7 +147,7 @@ export default function SettingsView() {
           p_user_id:  editingUser.id,
           p_password: userForm.password.trim(),
         });
-        if (pwErr) { push('error', 'Usuario actualizado pero no se pudo cambiar la contraseña'); return; }
+        if (pwErr) { setSavingUser(false); push('error', 'Usuario actualizado pero no se pudo cambiar la contraseña'); return; }
       }
       push('success', 'Usuario actualizado');
     } else {
@@ -158,7 +161,7 @@ export default function SettingsView() {
         active:     userForm.active,
         created_at: new Date().toISOString(),
       });
-      if (error) { push('error', 'Error al crear usuario'); return; }
+      if (error) { setSavingUser(false); push('error', 'Error al crear usuario'); return; }
 
       // Hashear y guardar contraseña en BD vía RPC
       const { error: pwErr } = await supabase.rpc('set_user_password', {
@@ -168,12 +171,17 @@ export default function SettingsView() {
       if (pwErr) {
         // Revertir: eliminar el usuario recién creado para no dejarlo sin contraseña
         await supabase.from('app_users').delete().eq('id', newId);
+        setSavingUser(false);
         push('error', 'No se pudo guardar la contraseña. Intenta de nuevo.');
         return;
       }
       push('success', 'Usuario creado');
     }
+    setSavingUser(false);
     setUserModal(false);
+    setUserForm(emptyUserForm());
+    setEditingUser(null);
+    setShowPassword(false);
     await refreshUsers();
   };
 
@@ -361,13 +369,13 @@ export default function SettingsView() {
       {/* ── User modal ── */}
       <Modal
         open={userModal}
-        onClose={() => setUserModal(false)}
+        onClose={() => { setUserModal(false); setUserForm(emptyUserForm()); setEditingUser(null); setShowPassword(false); }}
         title={editingUser ? 'Editar usuario' : 'Nuevo usuario'}
         size="md"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => setUserModal(false)}>Cancelar</button>
-            <button className="btn-primary" onClick={saveUser}>Guardar</button>
+            <button className="btn-secondary" onClick={() => { setUserModal(false); setUserForm(emptyUserForm()); setEditingUser(null); setShowPassword(false); }} disabled={savingUser}>Cancelar</button>
+            <button className="btn-primary" onClick={saveUser} disabled={savingUser}>{savingUser ? 'Guardando…' : 'Guardar'}</button>
           </>
         }
       >

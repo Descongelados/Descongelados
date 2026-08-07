@@ -9,4 +9,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { persistSession: false },
+  global: {
+    fetch: (url, options) =>
+      fetch(url, { ...options, signal: AbortSignal.timeout(30_000) }),
+  },
 });

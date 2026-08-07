@@ -270,7 +270,7 @@ export default function Customers() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditing(null); setForm(emptyForm); }}
         title={editing ? 'Editar cliente' : 'Nuevo cliente'}
         size="lg"
         footer={

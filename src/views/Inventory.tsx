@@ -518,6 +518,7 @@ export default function Inventory() {
   };
 
   const save = async () => {
+    if (saving) return;
     if (!form.name.trim()) {
       push('error', 'El nombre es obligatorio');
       return;
@@ -822,7 +823,7 @@ export default function Inventory() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditing(null); setForm(emptyForm); }}
         title={editing ? 'Editar producto' : 'Nuevo producto'}
         description="Los cambios de stock se reflejan automáticamente en el inventario."
         size="lg"

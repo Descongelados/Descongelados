@@ -44,12 +44,14 @@ export default function Modal({ open, onClose, title, description, children, foo
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby="modal-title"
+        aria-describedby={description ? 'modal-description' : undefined}
         className={`relative w-full ${sizeClasses[size]} card shadow-pop animate-scale-in max-h-[90vh] flex flex-col`}
       >
         <div className="flex items-start justify-between gap-4 p-5 border-b border-ink-100">
           <div>
-            <h2 className="text-lg font-semibold text-ink-900">{title}</h2>
-            {description && <p className="mt-0.5 text-sm text-ink-500">{description}</p>}
+            <h2 id="modal-title" className="text-lg font-semibold text-ink-900">{title}</h2>
+            {description && <p id="modal-description" className="mt-0.5 text-sm text-ink-500">{description}</p>}
           </div>
           <button
             onClick={onClose}

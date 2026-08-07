@@ -278,6 +278,7 @@ export default function Sales() {
   };
 
   const save = async () => {
+    if (saving) return;
     if (!form.customer_id) {
       push('error', 'Selecciona un cliente');
       return;
@@ -549,7 +550,7 @@ export default function Sales() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditing(null); setForm({ customer_id: '', invoice_number: '', sale_date: toDateInputValue(new Date()), notes: '', status: 'confirmada' }); setItems([]); }}
         title={editing ? 'Editar venta' : 'Nueva venta'}
         description="Los productos se descuentan del inventario al guardar."
         size="xl"

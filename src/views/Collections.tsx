@@ -434,10 +434,14 @@ export default function Collections({ onDataChanged }: Props) {
   const openEditSale = async (sale: SaleRow) => {
     // Products ya cargados en load() — solo fetch de sale_items de esta venta
     setEditSaleProducts(products);
-    const { data: itemsData } = await supabase
+    const { data: itemsData, error: itemsError } = await supabase
       .from('sale_items')
       .select('id, product_id, quantity, unit_price, has_tax, product:products(name, cost_price)')
       .eq('sale_id', sale.id);
+    if (itemsError) {
+      push('error', 'No se pudieron cargar los productos de la venta');
+      return;
+    }
     const itemsRes = { data: itemsData };
 
     const items: SaleItemEdit[] = ((itemsRes.data ?? []) as unknown as {
