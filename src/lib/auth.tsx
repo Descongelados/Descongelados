@@ -9,7 +9,7 @@ export type AppUser = {
   id: string;
   name: string;
   username: string;
-  password: string;
+  // password nunca se descarga al cliente — se gestiona vía RPC verify_password / set_user_password
   roles: Role[];
   active: boolean;
   created_at: string;
@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (savedId) {
           const { data } = await supabase
             .from('app_users')
-            .select('*')
+            .select('id, name, username, roles, active, created_at')
             .eq('id', savedId)
             .eq('active', true)
             .maybeSingle();
@@ -110,19 +110,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (username: string, password: string): Promise<boolean> => {
-    const { data: rows } = await supabase
-      .from('app_users')
-      .select('*')
-      .eq('active', true);
+    // RPC verify_password: compara bcrypt en BD — nunca descarga el hash al cliente
+    const { data } = await supabase.rpc('verify_password', {
+      p_username: username.trim().toLowerCase(),
+      p_password: password.trim(),
+    });
 
-    const normalUser = username.trim().toLowerCase();
-    const trimmedPass = password.trim();
-    const user = (rows ?? []).find(
-      (u) => u.username.toLowerCase() === normalUser && u.password === trimmedPass,
-    );
-
-    if (user) {
-      const appUser: AppUser = { ...user, roles: user.roles as Role[] };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = data as any;
+    if (result?.ok) {
+      const appUser: AppUser = {
+        id:         result.id,
+        name:       result.name,
+        username:   result.username,
+        roles:      result.roles as Role[],
+        active:     result.active,
+        created_at: result.created_at,
+      };
       setCurrentUser(appUser);
       localStorage.setItem(SESSION_KEY, appUser.id);
       return true;

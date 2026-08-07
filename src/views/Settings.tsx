@@ -86,7 +86,11 @@ export default function SettingsView() {
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
 
   const refreshUsers = async () => {
-    const { data } = await supabase.from('app_users').select('*').order('created_at');
+    // Excluir password del select — nunca debe viajar al cliente
+    const { data } = await supabase
+      .from('app_users')
+      .select('id, name, username, roles, active, created_at')
+      .order('created_at');
     setUsers((data ?? []).map((u) => ({ ...u, roles: u.roles as Role[] })));
     setUsersLoading(false);
   };
@@ -102,7 +106,8 @@ export default function SettingsView() {
 
   const openEditUser = (u: AppUser) => {
     setEditingUser(u);
-    setUserForm({ name: u.name, username: u.username, password: u.password, roles: [...u.roles], active: u.active });
+    // password se deja vacío — solo se envía si el admin quiere cambiarla
+    setUserForm({ name: u.name, username: u.username, password: '', roles: [...u.roles], active: u.active });
     setShowPassword(false);
     setUserModal(true);
   };
@@ -129,26 +134,43 @@ export default function SettingsView() {
     if (duplicate) { push('error', 'Ese nombre de usuario ya existe'); return; }
 
     if (editingUser) {
+      // Actualizar datos sin tocar el password
       const { error } = await supabase.from('app_users').update({
-        name: userForm.name.trim(),
+        name:     userForm.name.trim(),
         username: normalUsername,
-        password: userForm.password.trim() || editingUser.password,
-        roles: userForm.roles,
-        active: userForm.active,
+        roles:    userForm.roles,
+        active:   userForm.active,
       }).eq('id', editingUser.id);
       if (error) { push('error', 'Error al actualizar usuario'); return; }
+
+      // Si el admin escribió una nueva contraseña, actualizarla vía RPC (hashea en BD)
+      if (userForm.password.trim()) {
+        const { error: pwErr } = await supabase.rpc('set_user_password', {
+          p_user_id:  editingUser.id,
+          p_password: userForm.password.trim(),
+        });
+        if (pwErr) { push('error', 'Usuario actualizado pero no se pudo cambiar la contraseña'); return; }
+      }
       push('success', 'Usuario actualizado');
     } else {
+      // Crear usuario sin password — luego asignar hash vía RPC
+      const newId = crypto.randomUUID();
       const { error } = await supabase.from('app_users').insert({
-        id: Date.now().toString(),
-        name: userForm.name.trim(),
-        username: normalUsername,
-        password: userForm.password.trim(),
-        roles: userForm.roles,
-        active: userForm.active,
+        id:         newId,
+        name:       userForm.name.trim(),
+        username:   normalUsername,
+        roles:      userForm.roles,
+        active:     userForm.active,
         created_at: new Date().toISOString(),
       });
       if (error) { push('error', 'Error al crear usuario'); return; }
+
+      // Hashear y guardar contraseña en BD vía RPC
+      const { error: pwErr } = await supabase.rpc('set_user_password', {
+        p_user_id:  newId,
+        p_password: userForm.password.trim(),
+      });
+      if (pwErr) { push('error', 'Usuario creado pero no se pudo guardar la contraseña'); return; }
       push('success', 'Usuario creado');
     }
     setUserModal(false);
