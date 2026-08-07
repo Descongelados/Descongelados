@@ -73,6 +73,12 @@ type SaleRow = {
   tax: number;
   status: string;
   customer: { name: string; phone?: string } | null;
+  sale_items: {
+    quantity: number;
+    unit_price: number;
+    subtotal: number;
+    product: { name: string; cost_price: number } | null;
+  }[];
 };
 
 type CollectionRow = { amount: number; payment_method: string };
@@ -228,10 +234,11 @@ export default function Reports() {
 
     const end = `${to}T23:59:59`;
 
+    // Un solo Promise.all — sale_items viene embebido en la query de sales
     const [salesRes, collectionsRes, purchasesRes, spRes] = await Promise.all([
       supabase
         .from('sales')
-        .select('id, invoice_number, sale_date, total, subtotal, tax, status, customer:customers(name, phone)')
+        .select('id, invoice_number, sale_date, total, subtotal, tax, status, customer:customers(name, phone), sale_items(quantity, unit_price, subtotal, product:products(name, cost_price))')
         .eq('status', 'confirmada')
         .gte('sale_date', from)
         .lte('sale_date', end)
@@ -254,38 +261,26 @@ export default function Reports() {
         .lte('payment_date', end),
     ]);
 
-    // Fetch sale_items scoped to the sales in range — sale_date via JOIN a sales
-    let saleItems: SaleItemRow[] = [];
-    if (!salesRes.error && salesRes.data && salesRes.data.length > 0) {
-      const saleIds = salesRes.data.map((s) => s.id);
-      const { data: itemData } = await supabase
-        .from('sale_items')
-        .select('quantity, unit_price, subtotal, product:products(name, cost_price), sale:sales(sale_date)')
-        .in('sale_id', saleIds);
-
-      saleItems = ((itemData ?? []) as unknown as {
-        quantity: number;
-        unit_price: number;
-        subtotal: number;
-        product: { name: string; cost_price: number } | null;
-        sale: { sale_date: string } | null;
-      }[]).map((it) => ({
-        quantity: it.quantity,
-        unit_price: it.unit_price,
-        subtotal: it.subtotal,
-        sale_date: it.sale?.sale_date ?? from,
-        product: it.product,
-      }));
-    }
-
     if (salesRes.error || collectionsRes.error || purchasesRes.error || spRes.error) {
       setError('No se pudieron cargar los datos del reporte');
       setLoading(false);
       return;
     }
 
+    // Aplanar sale_items desde cada venta, preservando sale_date de la venta padre
+    const sales = (salesRes.data ?? []) as unknown as SaleRow[];
+    const saleItems: SaleItemRow[] = sales.flatMap((s) =>
+      (s.sale_items ?? []).map((it) => ({
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        subtotal: it.subtotal,
+        sale_date: s.sale_date,
+        product: it.product,
+      }))
+    );
+
     setReportData({
-      sales: (salesRes.data ?? []) as unknown as SaleRow[],
+      sales,
       collections: (collectionsRes.data ?? []) as CollectionRow[],
       purchases: (purchasesRes.data ?? []) as PurchaseRow[],
       supplierPayments: (spRes.data ?? []) as SupplierPaymentRow[],
