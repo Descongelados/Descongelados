@@ -174,28 +174,38 @@ export default function Purchases() {
 
   const load = async () => {
     setLoading(true);
-    // Últimos 6 meses — igual que Collections, para mostrar saldos pendientes históricos
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const fromStr = sixMonthsAgo.toISOString().slice(0, 10);
+    // Semana actual — lunes a domingo
+    const now = new Date();
+    const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diff);
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    const mondayStr = monday.toISOString().slice(0, 10);
+    const sundayStr = `${sunday.toISOString().slice(0, 10)}T23:59:59`;
 
     const [pRes, sRes, prodRes, supPaysRes, expRes] = await Promise.all([
       supabase
         .from('purchases')
         .select('id, invoice_number, purchase_date, total, subtotal, tax, status, supplier_id, notes, created_at, supplier:suppliers(id, name)')
-        .gte('purchase_date', fromStr)
+        .gte('purchase_date', mondayStr)
+        .lte('purchase_date', sundayStr)
         .order('purchase_date', { ascending: false }),
       supabase.from('suppliers').select('id, name, phone, tax_id, email, city, contact, created_at').order('name'),
       supabase.from('products').select('id, sku, name, cost_price, sale_price, stock, unit, is_active').order('name'),
       supabase
         .from('supplier_payments')
         .select('id, purchase_id, supplier_id, amount, payment_method, payment_date, reference, notes, created_at, supplier:suppliers(id, name), purchase:purchases(id, invoice_number, total)')
-        .gte('payment_date', fromStr)
+        .gte('payment_date', mondayStr)
+        .lte('payment_date', sundayStr)
         .order('payment_date', { ascending: false }),
       supabase
         .from('business_expenses')
         .select('*')
-        .gte('expense_date', fromStr)
+        .gte('expense_date', mondayStr)
+        .lte('expense_date', sundayStr)
         .order('expense_date', { ascending: false }),
     ]);
     if (pRes.error) {
