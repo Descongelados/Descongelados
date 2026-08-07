@@ -99,6 +99,7 @@ export default function Collections({ onDataChanged }: Props) {
   const [sales, setSales] = useState<SaleRow[] | null>(null);
   const [collections, setCollections] = useState<CollectionRow[] | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<{ id: string; name: string; cost_price: number; price: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -125,7 +126,7 @@ export default function Collections({ onDataChanged }: Props) {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
 
-    const [sRes, cRes, custRes] = await Promise.all([
+    const [sRes, cRes, custRes, prodRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
@@ -138,6 +139,7 @@ export default function Collections({ onDataChanged }: Props) {
         .gte('collection_date', sixMonthsAgoStr)
         .order('collection_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
+      supabase.from('products').select('id, name, cost_price, price').order('name'),
     ]);
     if (sRes.error) {
       push('error', 'No se pudieron cargar las ventas');
@@ -152,6 +154,7 @@ export default function Collections({ onDataChanged }: Props) {
       setCollections(cRes.data as CollectionRow[]);
     }
     if (!custRes.error) setCustomers(custRes.data as Customer[]);
+    if (!prodRes.error) setProducts((prodRes.data ?? []) as { id: string; name: string; cost_price: number; price: number }[]);
     setLoading(false);
   };
 
@@ -440,13 +443,13 @@ export default function Collections({ onDataChanged }: Props) {
   // ── open edit-sale modal ──────────────────────────────────────────────────
 
   const openEditSale = async (sale: SaleRow) => {
-    // Fetch products catalogue + existing sale_items in parallel
-    const [prodRes, itemsRes] = await Promise.all([
-      supabase.from('products').select('id, name, cost_price, price').order('name'),
-      supabase.from('sale_items').select('id, product_id, quantity, unit_price, has_tax, product:products(name, cost_price)').eq('sale_id', sale.id),
-    ]);
-    const prods = (prodRes.data ?? []) as { id: string; name: string; cost_price: number; price: number }[];
-    setEditSaleProducts(prods);
+    // Products ya cargados en load() — solo fetch de sale_items de esta venta
+    setEditSaleProducts(products);
+    const { data: itemsData } = await supabase
+      .from('sale_items')
+      .select('id, product_id, quantity, unit_price, has_tax, product:products(name, cost_price)')
+      .eq('sale_id', sale.id);
+    const itemsRes = { data: itemsData };
 
     const items: SaleItemEdit[] = ((itemsRes.data ?? []) as unknown as {
       id: string; product_id: string; quantity: number; unit_price: number; has_tax: boolean;
