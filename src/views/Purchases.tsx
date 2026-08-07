@@ -552,6 +552,7 @@ export default function Purchases() {
   };
 
   const saveSupPay = async () => {
+    if (savingSupPay) return;
     const amount = Number(supPayForm.amount);
     if (!supPayForm.supplier_id) {
       push('error', 'Selecciona un proveedor');
@@ -626,6 +627,7 @@ export default function Purchases() {
   };
 
   const saveExpense = async () => {
+    if (savingExpense) return;
     if (!expenseForm.description.trim()) {
       push('error', 'Escribe una descripcion del gasto');
       return;
@@ -1469,13 +1471,13 @@ export default function Purchases() {
       {/* Register/edit supplier payment modal */}
       <Modal
         open={supPayOpen}
-        onClose={() => setSupPayOpen(false)}
+        onClose={() => { setSupPayOpen(false); setSupPayForm(emptySupPayForm()); setEditingSupPay(null); }}
         title={editingSupPay ? 'Editar pago a proveedor' : 'Registrar pago a proveedor'}
         description={editingSupPay ? 'Modifica los datos del pago' : 'Registra un pago por una compra a credito'}
         size="lg"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => setSupPayOpen(false)} disabled={savingSupPay}>
+            <button className="btn-secondary" onClick={() => { setSupPayOpen(false); setSupPayForm(emptySupPayForm()); setEditingSupPay(null); }} disabled={savingSupPay}>
               Cancelar
             </button>
             <button className="btn-success" onClick={saveSupPay} disabled={savingSupPay}>
@@ -1633,13 +1635,13 @@ export default function Purchases() {
       {/* Nuevo / Editar gasto extra */}
       <Modal
         open={expenseOpen}
-        onClose={() => setExpenseOpen(false)}
+        onClose={() => { setExpenseOpen(false); setExpenseForm(emptyExpenseForm()); setEditingExpense(null); }}
         title={editingExpense ? 'Editar gasto' : 'Registrar gasto extra'}
         description="Gastos operativos que no corresponden a compras de inventario"
         size="lg"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => setExpenseOpen(false)} disabled={savingExpense}>
+            <button className="btn-secondary" onClick={() => { setExpenseOpen(false); setExpenseForm(emptyExpenseForm()); setEditingExpense(null); }} disabled={savingExpense}>
               Cancelar
             </button>
             <button className="btn-primary" onClick={saveExpense} disabled={savingExpense}>
@@ -1774,6 +1776,7 @@ export default function Purchases() {
               <label className="label">Notas</label>
               <input
                 className="input"
+                maxLength={500}
                 value={expenseForm.notes}
                 onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
                 placeholder="Notas internas"

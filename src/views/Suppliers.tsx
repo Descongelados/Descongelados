@@ -282,6 +282,7 @@ export default function Suppliers() {
             <label className="label">Nombre / Razón social *</label>
             <input
               className="input"
+              maxLength={255}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Ej. Proveedora Industrial SA"
@@ -291,6 +292,7 @@ export default function Suppliers() {
             <label className="label">RFC / Tax ID</label>
             <input
               className="input"
+              maxLength={50}
               value={form.tax_id}
               onChange={(e) => setForm({ ...form, tax_id: e.target.value })}
             />
@@ -299,6 +301,7 @@ export default function Suppliers() {
             <label className="label">Contacto</label>
             <input
               className="input"
+              maxLength={100}
               value={form.contact}
               onChange={(e) => setForm({ ...form, contact: e.target.value })}
               placeholder="Nombre del vendedor"
@@ -308,6 +311,7 @@ export default function Suppliers() {
             <label className="label">Teléfono</label>
             <input
               className="input"
+              maxLength={20}
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
@@ -317,6 +321,7 @@ export default function Suppliers() {
             <input
               className="input"
               type="email"
+              maxLength={100}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
@@ -325,6 +330,7 @@ export default function Suppliers() {
             <label className="label">Ciudad</label>
             <input
               className="input"
+              maxLength={100}
               value={form.city}
               onChange={(e) => setForm({ ...form, city: e.target.value })}
             />
@@ -333,6 +339,7 @@ export default function Suppliers() {
             <label className="label">Dirección</label>
             <input
               className="input"
+              maxLength={255}
               value={form.address}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
             />

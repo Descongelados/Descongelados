@@ -318,6 +318,7 @@ export default function Collections({ onDataChanged }: Props) {
   }, [paymentForm.efectivo, paymentForm.banco, paymentForm.por_pagar]);
 
   const savePayment = async () => {
+    if (saving) return;
     if (editPayment) {
       const amount = Number(paymentForm.amount);
       if (!amount || amount <= 0) {
@@ -1019,7 +1020,7 @@ export default function Collections({ onDataChanged }: Props) {
 
       <Modal
         open={paymentOpen}
-        onClose={() => setPaymentOpen(false)}
+        onClose={() => { setPaymentOpen(false); setPaymentForm(emptyPaymentForm()); setPaymentTarget(null); setEditPayment(null); }}
         title={editPayment ? 'Editar pago' : 'Registrar pago'}
         description={
           paymentTarget
@@ -1029,7 +1030,7 @@ export default function Collections({ onDataChanged }: Props) {
         size="lg"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => setPaymentOpen(false)} disabled={saving}>
+            <button className="btn-secondary" onClick={() => { setPaymentOpen(false); setPaymentForm(emptyPaymentForm()); setPaymentTarget(null); setEditPayment(null); }} disabled={saving}>
               Cancelar
             </button>
             <button className="btn-success" onClick={savePayment} disabled={saving}>

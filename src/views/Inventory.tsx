@@ -852,6 +852,7 @@ export default function Inventory() {
             <label className="label">Nombre *</label>
             <input
               className="input"
+              maxLength={255}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Nombre del producto"
@@ -862,6 +863,7 @@ export default function Inventory() {
             <textarea
               className="input"
               rows={2}
+              maxLength={500}
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder="Descripción opcional"
@@ -872,6 +874,7 @@ export default function Inventory() {
             <input
               className="input"
               list="categories-list"
+              maxLength={100}
               value={form.category}
               onChange={(e) => setForm({ ...form, category: e.target.value })}
               placeholder="Ej. Bebidas"
@@ -886,6 +889,7 @@ export default function Inventory() {
             <label className="label">Unidad</label>
             <input
               className="input"
+              maxLength={50}
               value={form.unit}
               onChange={(e) => setForm({ ...form, unit: e.target.value })}
               placeholder="unidad, kg, lt…"

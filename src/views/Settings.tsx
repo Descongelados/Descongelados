@@ -375,11 +375,11 @@ export default function SettingsView() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Nombre completo *</label>
-              <input className="input" value={userForm.name} onChange={(e) => setUserForm((f) => ({ ...f, name: e.target.value }))} placeholder="Nombre visible" />
+              <input className="input" maxLength={255} value={userForm.name} onChange={(e) => setUserForm((f) => ({ ...f, name: e.target.value }))} placeholder="Nombre visible" />
             </div>
             <div>
               <label className="label">Usuario (login) *</label>
-              <input className="input" value={userForm.username} onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))} placeholder="usuario123" autoCapitalize="none" />
+              <input className="input" maxLength={50} value={userForm.username} onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))} placeholder="usuario123" autoCapitalize="none" />
             </div>
           </div>
           <div>
@@ -388,6 +388,7 @@ export default function SettingsView() {
               <input
                 className="input pr-10"
                 type={showPassword ? 'text' : 'password'}
+                maxLength={128}
                 value={userForm.password}
                 onChange={(e) => setUserForm((f) => ({ ...f, password: e.target.value }))}
                 placeholder="••••••••"
