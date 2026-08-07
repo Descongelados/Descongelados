@@ -329,42 +329,49 @@ export default function Sales() {
       load();
       setSaving(false);
     } else {
-      const { data: created, error } = await supabase.from('sales').insert(payload).select().single();
+      // RPC atómica: INSERT sales + INSERT sale_items en una sola transacción
+      const { data: rpcData, error } = await supabase.rpc('create_sale', {
+        p_customer_id:    payload.customer_id,
+        p_invoice_number: payload.invoice_number,
+        p_sale_date:      payload.sale_date,
+        p_notes:          payload.notes,
+        p_status:         payload.status,
+        p_subtotal:       payload.subtotal,
+        p_tax:            payload.tax,
+        p_total:          payload.total,
+        p_items: validItems.map((it) => ({
+          product_id: it.product_id,
+          quantity:   Number(it.quantity),
+          unit_price: Number(it.unit_price),
+          subtotal:   Number(it.quantity) * Number(it.unit_price),
+        })),
+      });
       if (error) {
         push('error', 'No se pudo crear la venta');
         setSaving(false);
         return;
       }
-      const itemPayload = validItems.map((it) => ({
-        sale_id: created.id,
-        product_id: it.product_id,
-        quantity: Number(it.quantity),
-        unit_price: Number(it.unit_price),
-        subtotal: Number(it.quantity) * Number(it.unit_price),
-      }));
-      const { data: insertedItems, error: itemErr } = await supabase
-        .from('sale_items')
-        .insert(itemPayload)
-        .select();
-      if (itemErr) {
-        push('error', 'No se guardaron los productos');
-        setSaving(false);
-        return;
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = rpcData as any;
       push('success', 'Venta registrada');
       setModalOpen(false);
       setSaving(false);
-      load(); // refresh list in background
+      load();
+      // Construir recibo con los datos devueltos por la RPC
       const customer = customers.find((c) => c.id === form.customer_id) ?? null;
-      const row: SaleRow = { ...(created as Sale), customer };
-      // Construir los items con el objeto product completo para el recibo,
-      // usando los registros insertados (que tienen id de BD) y los productos en memoria.
-      const builtReceiptItems: ReceiptItem[] = (insertedItems ?? []).map((dbItem) => ({
-        ...(dbItem as SaleItem),
+      const createdSale = {
+        ...payload,
+        id: result.sale_id,
+        created_at: new Date().toISOString(),
+        delivery_status: 'pendiente',
+        customer,
+      } as unknown as SaleRow;
+      const builtReceiptItems: ReceiptItem[] = (result.items ?? []).map((dbItem: SaleItem) => ({
+        ...dbItem,
         product: products.find((p) => p.id === dbItem.product_id) ?? null,
       }));
       setReceiptItems(builtReceiptItems);
-      setReceiptSale(row);
+      setReceiptSale(createdSale);
     }
   };
 
