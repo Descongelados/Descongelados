@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   DollarSign,
   ShoppingCart,
@@ -91,7 +91,10 @@ function currentWeekRange(): { mondayISO: string; sundayISO: string; label: stri
   return { mondayISO: toLocalISO(monday), sundayISO: toLocalISO(sunday), label };
 }
 
-export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
+export type DashboardHandle = { refresh: () => void };
+
+const Dashboard = forwardRef<DashboardHandle, { onNavigate: (view: ViewKey) => void }>(
+function Dashboard({ onNavigate }, ref) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,53 +129,63 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
 
   const { mondayISO, sundayISO, label: weekLabel } = currentWeekRange();
 
+  const loadRef = useRef<() => Promise<void>>();
+
+  const load = async () => {
+    setData(null);
+
+    // Un solo Promise.all: RPC con todos los KPIs + 2 queries pequeñas de display
+    const [kpisRes, recentSalesRes, lowStockRes] = await Promise.all([
+      supabase.rpc('dashboard_kpis', {
+        p_week_from: mondayISO,
+        p_week_to:   sundayISO,
+      }),
+      supabase
+        .from('sales')
+        .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
+        .gte('sale_date', mondayISO)
+        .lte('sale_date', sundayISO)
+        .order('sale_date', { ascending: false })
+        .limit(10),
+      supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
+    ]);
+
+    if (kpisRes.error || lowStockRes.error) {
+      setError('No se pudieron cargar las métricas');
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const k = kpisRes.data as any;
+    const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
+
+    setData({
+      totalSales:          Number(k.total_sales),
+      totalPurchases:      Number(k.total_purchases),
+      totalCollected:      Number(k.total_collected),
+      collectedCash:       Number(k.collected_cash),
+      collectedBank:       Number(k.collected_bank),
+      weekSalesCollected:  Number(k.week_sales_collected),
+      bankSalesCollected:  Number(k.bank_sales_collected),
+      totalToCollect:      Number(k.total_to_collect),
+      totalToPay:          Number(k.total_to_pay),
+      cashSales:           Number(k.cash_sales),
+      cashExpenses:        Number(k.cash_expenses),
+      bankExpenses:        Number(k.bank_expenses),
+      lowStockCount:       Number(k.low_stock_count),
+      recentSales:         (recentSalesRes.data ?? []) as unknown as DashboardData['recentSales'],
+      lowStockProducts:    actualLowStock.slice(0, 5),
+    });
+  };
+
+  loadRef.current = load;
+
+  // Exponer refresh() al padre sin re-montar el componente
+  useImperativeHandle(ref, () => ({
+    refresh: () => { loadRef.current?.(); },
+  }), []);
+
   useEffect(() => {
-    const load = async () => {
-      setData(null);
-
-      // Un solo Promise.all: RPC con todos los KPIs + 2 queries pequeñas de display
-      const [kpisRes, recentSalesRes, lowStockRes] = await Promise.all([
-        supabase.rpc('dashboard_kpis', {
-          p_week_from: mondayISO,
-          p_week_to:   sundayISO,
-        }),
-        supabase
-          .from('sales')
-          .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
-          .gte('sale_date', mondayISO)
-          .lte('sale_date', sundayISO)
-          .order('sale_date', { ascending: false })
-          .limit(10),
-        supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
-      ]);
-
-      if (kpisRes.error || lowStockRes.error) {
-        setError('No se pudieron cargar las métricas');
-        return;
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const k = kpisRes.data as any;
-      const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
-
-      setData({
-        totalSales:          Number(k.total_sales),
-        totalPurchases:      Number(k.total_purchases),
-        totalCollected:      Number(k.total_collected),
-        collectedCash:       Number(k.collected_cash),
-        collectedBank:       Number(k.collected_bank),
-        weekSalesCollected:  Number(k.week_sales_collected),
-        bankSalesCollected:  Number(k.bank_sales_collected),
-        totalToCollect:      Number(k.total_to_collect),
-        totalToPay:          Number(k.total_to_pay),
-        cashSales:           Number(k.cash_sales),
-        cashExpenses:        Number(k.cash_expenses),
-        bankExpenses:        Number(k.bank_expenses),
-        lowStockCount:       Number(k.low_stock_count),
-        recentSales:         (recentSalesRes.data ?? []) as unknown as DashboardData['recentSales'],
-        lowStockProducts:    actualLowStock.slice(0, 5),
-      });
-    };
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -401,5 +414,6 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       )}
     </div>
   );
-}
+});
 
+export default Dashboard;

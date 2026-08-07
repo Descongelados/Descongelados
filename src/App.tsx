@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import Sidebar, { ViewKey } from './components/Sidebar';
 import { ToastProvider } from './components/ui/Toast';
 import { AuthProvider, useAuth } from './lib/auth';
 import LoginScreen from './components/LoginScreen';
-import Dashboard from './views/Dashboard';
+import Dashboard, { DashboardHandle } from './views/Dashboard';
 import Inventory from './views/Inventory';
 import Purchases from './views/Purchases';
 import Sales from './views/Sales';
@@ -16,10 +16,10 @@ import Settings from './views/Settings';
 function AppShell() {
   const { currentUser, authLoading } = useAuth();
   const [view, setView] = useState<ViewKey>('dashboard');
-  const [dashboardKey, setDashboardKey] = useState(0);
+  const dashboardRef = useRef<DashboardHandle>(null);
 
   const handleCollectionsDataChanged = useCallback(() => {
-    setDashboardKey((k) => k + 1);
+    dashboardRef.current?.refresh();
   }, []);
 
   if (authLoading) {
@@ -37,7 +37,7 @@ function AppShell() {
       <Sidebar current={view} onNavigate={setView} />
       <main className="flex-1 min-w-0 lg:pl-0">
         <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 max-w-[1400px] mx-auto pt-16 lg:pt-8">
-          {view === 'dashboard'   && <Dashboard key={dashboardKey} onNavigate={setView} />}
+          {view === 'dashboard'   && <Dashboard ref={dashboardRef} onNavigate={setView} />}
           {view === 'inventory'   && <Inventory />}
           {view === 'purchases'   && <Purchases />}
           {view === 'sales'       && <Sales />}
