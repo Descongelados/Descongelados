@@ -254,21 +254,21 @@ export default function SettingsView() {
             <div className="space-y-4">
               <div>
                 <label className="label">Nombre de la empresa *</label>
-                <input className="input" value={company.name} onChange={(e) => setCompany((c) => ({ ...c, name: e.target.value }))} placeholder="Nombre comercial" />
+                <input className="input" maxLength={255} value={company.name} onChange={(e) => setCompany((c) => ({ ...c, name: e.target.value }))} placeholder="Nombre comercial" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="label">RFC</label>
-                  <input className="input" value={company.rfc} onChange={(e) => setCompany((c) => ({ ...c, rfc: e.target.value }))} placeholder="XAXX010101000" />
+                  <input className="input" maxLength={50} value={company.rfc} onChange={(e) => setCompany((c) => ({ ...c, rfc: e.target.value }))} placeholder="XAXX010101000" />
                 </div>
                 <div>
                   <label className="label">Teléfono</label>
-                  <input className="input" value={company.phone} onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))} placeholder="55 0000 0000" />
+                  <input className="input" maxLength={20} value={company.phone} onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))} placeholder="55 0000 0000" />
                 </div>
               </div>
               <div>
                 <label className="label">Dirección</label>
-                <input className="input" value={company.address} onChange={(e) => setCompany((c) => ({ ...c, address: e.target.value }))} placeholder="Calle, número, colonia, ciudad" />
+                <input className="input" maxLength={255} value={company.address} onChange={(e) => setCompany((c) => ({ ...c, address: e.target.value }))} placeholder="Calle, número, colonia, ciudad" />
               </div>
               <div className="flex justify-end">
                 <button className="btn-primary" onClick={saveCompanyInfo} disabled={companySaving}>

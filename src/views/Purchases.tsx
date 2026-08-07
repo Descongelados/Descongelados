@@ -369,7 +369,7 @@ export default function Purchases() {
   const openEdit = async (p: PurchaseRow) => {
     setEditing(p);
     const [itemsRes, paysRes] = await Promise.all([
-      supabase.from('purchase_items').select('*').eq('purchase_id', p.id),
+      supabase.from('purchase_items').select('id, product_id, quantity, unit_cost').eq('purchase_id', p.id),
       supabase.from('supplier_payments').select('amount, payment_method').eq('purchase_id', p.id),
     ]);
     setForm({
@@ -503,7 +503,7 @@ export default function Purchases() {
   const openDetail = async (p: PurchaseRow) => {
     setDetailOpen(p);
     const [itemsRes, paysRes] = await Promise.all([
-      supabase.from('purchase_items').select('*, product:products(*)').eq('purchase_id', p.id),
+      supabase.from('purchase_items').select('id, product_id, quantity, unit_cost, subtotal, product:products(id, sku, name, cost_price, unit)').eq('purchase_id', p.id),
       supabase.from('supplier_payments').select('amount, payment_method, payment_date').eq('purchase_id', p.id),
     ]);
     setDetailItems((itemsRes.data as (PurchaseItem & { product: Product | null })[]) ?? []);
@@ -1158,6 +1158,7 @@ export default function Purchases() {
               <input
                 className="input"
                 type="date"
+                max={toDateInputValue(new Date())}
                 value={form.purchase_date}
                 onChange={(e) => setForm({ ...form, purchase_date: e.target.value })}
               />
@@ -1597,6 +1598,7 @@ export default function Purchases() {
               <input
                 className="input"
                 type="date"
+                max={toDateInputValue(new Date())}
                 value={supPayForm.payment_date}
                 onChange={(e) => setSupPayForm({ ...supPayForm, payment_date: e.target.value })}
               />
@@ -1608,6 +1610,7 @@ export default function Purchases() {
               <label className="label">Referencia</label>
               <input
                 className="input"
+                maxLength={100}
                 value={supPayForm.reference}
                 onChange={(e) => setSupPayForm({ ...supPayForm, reference: e.target.value })}
                 placeholder="Folio de transferencia, etc."
@@ -1617,6 +1620,7 @@ export default function Purchases() {
               <label className="label">Notas</label>
               <input
                 className="input"
+                maxLength={500}
                 value={supPayForm.notes}
                 onChange={(e) => setSupPayForm({ ...supPayForm, notes: e.target.value })}
                 placeholder="Notas internas"
@@ -1672,6 +1676,7 @@ export default function Purchases() {
               <input
                 className="input"
                 type="date"
+                max={toDateInputValue(new Date())}
                 value={expenseForm.expense_date}
                 onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
               />

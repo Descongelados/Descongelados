@@ -1192,6 +1192,7 @@ export default function Collections({ onDataChanged }: Props) {
                 <input
                   className="input"
                   type="date"
+                  max={toDateInputValue(new Date())}
                   value={paymentForm.payment_date}
                   onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
                 />
@@ -1205,6 +1206,7 @@ export default function Collections({ onDataChanged }: Props) {
               <input
                 className="input"
                 type="date"
+                max={toDateInputValue(new Date())}
                 value={paymentForm.payment_date}
                 onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
               />
@@ -1216,6 +1218,7 @@ export default function Collections({ onDataChanged }: Props) {
               <label className="label">Referencia</label>
               <input
                 className="input"
+                maxLength={100}
                 value={paymentForm.reference}
                 onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
                 placeholder="Folio de transferencia, etc."
@@ -1225,6 +1228,7 @@ export default function Collections({ onDataChanged }: Props) {
               <label className="label">Notas</label>
               <input
                 className="input"
+                maxLength={500}
                 value={paymentForm.notes}
                 onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
                 placeholder="Notas internas"

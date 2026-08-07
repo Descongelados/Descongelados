@@ -20,8 +20,25 @@ import PageHeader from '../components/ui/PageHeader';
 import Badge from '../components/ui/Badge';
 import { FullPageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
+import { useToast } from '../components/ui/Toast';
 import { ViewKey } from '../components/Sidebar';
 
+
+type KpisResult = {
+  total_sales: number;
+  total_purchases: number;
+  total_collected: number;
+  collected_cash: number;
+  collected_bank: number;
+  week_sales_collected: number;
+  bank_sales_collected: number;
+  total_to_collect: number;
+  total_to_pay: number;
+  cash_sales: number;
+  cash_expenses: number;
+  bank_expenses: number;
+  low_stock_count: number;
+};
 
 type DashboardData = {
   totalSales: number;
@@ -95,6 +112,7 @@ export type DashboardHandle = { refresh: () => void };
 
 const Dashboard = forwardRef<DashboardHandle, { onNavigate: (view: ViewKey) => void }>(
 function Dashboard({ onNavigate }, ref) {
+  const { push } = useToast();
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,6 +120,7 @@ function Dashboard({ onNavigate }, ref) {
   const [cashInitial, setCashInitial] = useState<number>(0);
   const [editingCash, setEditingCash] = useState(false);
   const [cashDraft, setCashDraft] = useState('');
+  const [cashSaving, setCashSaving] = useState(false);
 
   useEffect(() => {
     supabase
@@ -120,11 +139,17 @@ function Dashboard({ onNavigate }, ref) {
   };
   const commitCash = async () => {
     const val = Math.max(0, Number(cashDraft) || 0);
-    setCashInitial(val);
-    setEditingCash(false);
-    await supabase
+    setCashSaving(true);
+    const { error } = await supabase
       .from('app_settings')
       .upsert({ key: 'dashboard_cash_initial', value: { amount: val } });
+    setCashSaving(false);
+    if (error) {
+      push('error', 'No se pudo guardar el efectivo inicial');
+      return;
+    }
+    setCashInitial(val);
+    setEditingCash(false);
   };
 
   const { mondayISO, sundayISO, label: weekLabel } = currentWeekRange();
@@ -155,8 +180,7 @@ function Dashboard({ onNavigate }, ref) {
       return;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const k = kpisRes.data as any;
+    const k = kpisRes.data as KpisResult;
     const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
 
     setData({
@@ -295,7 +319,7 @@ function Dashboard({ onNavigate }, ref) {
                       onKeyDown={(e) => { if (e.key === 'Enter') commitCash(); if (e.key === 'Escape') setEditingCash(false); }}
                       autoFocus
                     />
-                    <button onClick={commitCash} className="rounded-lg p-1.5 bg-success-50 text-success-600 hover:bg-success-100 transition" title="Confirmar">
+                    <button onClick={commitCash} disabled={cashSaving} className="rounded-lg p-1.5 bg-success-50 text-success-600 hover:bg-success-100 transition disabled:opacity-50" title="Confirmar">
                       <Check size={15} />
                     </button>
                   </div>
@@ -307,7 +331,7 @@ function Dashboard({ onNavigate }, ref) {
                     </button>
                   </div>
                 )}
-                <p className="text-[11px] text-ink-400 mt-1">Editable · no se guarda en BD</p>
+                <p className="text-[11px] text-ink-400 mt-1">Se guarda en configuración</p>
               </div>
 
               {/* Ventas en efectivo */}

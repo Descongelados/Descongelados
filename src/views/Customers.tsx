@@ -55,7 +55,7 @@ export default function Customers() {
     setLoading(true);
     const { data, error } = await supabase
       .from('customer_balances')
-      .select('*')
+      .select('id, name, tax_id, phone, email, address, city, credit_limit, total_purchased, total_paid, balance')
       .order('name', { ascending: true });
     if (error) {
       push('error', 'No se pudo cargar los clientes');
@@ -289,6 +289,7 @@ export default function Customers() {
             <label className="label">Nombre / Razón social *</label>
             <input
               className="input"
+              maxLength={255}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Ej. Distribuidora del Norte SA"
@@ -298,6 +299,7 @@ export default function Customers() {
             <label className="label">RFC / Tax ID</label>
             <input
               className="input"
+              maxLength={50}
               value={form.tax_id}
               onChange={(e) => setForm({ ...form, tax_id: e.target.value })}
               placeholder="Ej. ABC123456789"
@@ -307,6 +309,7 @@ export default function Customers() {
             <label className="label">Teléfono</label>
             <input
               className="input"
+              maxLength={20}
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
               placeholder="Ej. +52 55 1234 5678"
@@ -317,6 +320,7 @@ export default function Customers() {
             <input
               className="input"
               type="email"
+              maxLength={100}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               placeholder="cliente@correo.com"
@@ -326,6 +330,7 @@ export default function Customers() {
             <label className="label">Ciudad</label>
             <input
               className="input"
+              maxLength={100}
               value={form.city}
               onChange={(e) => setForm({ ...form, city: e.target.value })}
               placeholder="Ej. Monterrey, NL"
@@ -335,6 +340,7 @@ export default function Customers() {
             <label className="label">Dirección</label>
             <input
               className="input"
+              maxLength={255}
               value={form.address}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
               placeholder="Calle, número, colonia"

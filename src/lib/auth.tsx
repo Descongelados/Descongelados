@@ -5,6 +5,16 @@ import { supabase } from './supabase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+type VerifyPasswordResult = {
+  ok: boolean;
+  id: string;
+  name: string;
+  username: string;
+  roles: Role[];
+  active: boolean;
+  created_at: string;
+};
+
 export type AppUser = {
   id: string;
   name: string;
@@ -117,14 +127,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       p_password: password.trim(),
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = data as any;
+    const result = data as VerifyPasswordResult | null;
     if (result?.ok) {
       const appUser: AppUser = {
         id:         result.id,
         name:       result.name,
         username:   result.username,
-        roles:      result.roles as Role[],
+        roles:      result.roles,
         active:     result.active,
         created_at: result.created_at,
       };

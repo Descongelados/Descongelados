@@ -245,7 +245,7 @@ export default function Sales() {
 
   const openEdit = async (s: SaleRow) => {
     setEditing(s);
-    const { data: existingItems } = await supabase.from('sale_items').select('*').eq('sale_id', s.id);
+    const { data: existingItems } = await supabase.from('sale_items').select('id, product_id, quantity, unit_price').eq('sale_id', s.id);
     setForm({
       customer_id: s.customer_id,
       invoice_number: s.invoice_number ?? '',
@@ -392,7 +392,7 @@ export default function Sales() {
     setDetailOpen(s);
     const { data } = await supabase
       .from('sale_items')
-      .select('*, product:products(*)')
+      .select('id, product_id, quantity, unit_price, subtotal, product:products(id, sku, name, sale_price, cost_price, unit)')
       .eq('sale_id', s.id);
     setDetailItems((data as (SaleItem & { product: Product | null })[]) ?? []);
   };
@@ -698,6 +698,7 @@ export default function Sales() {
               <textarea
                 className="input"
                 rows={2}
+                maxLength={500}
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 placeholder="Notas internas (opcional)"
