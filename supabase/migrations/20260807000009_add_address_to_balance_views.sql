@@ -4,9 +4,17 @@
 -- Problema: el campo address no estaba en las vistas, por lo que
 -- al abrir edición de un cliente o proveedor, siempre llegaba
 -- vacío y al guardar sobreescribía la dirección guardada con null.
+--
+-- Nota: se usa DROP + CREATE en lugar de CREATE OR REPLACE porque
+-- PostgreSQL no permite agregar columnas en posiciones intermedias
+-- con OR REPLACE — requiere que el listado de columnas sea idéntico
+-- excepto por adiciones al final.
 -- ============================================================
 
-CREATE OR REPLACE VIEW customer_balances AS
+DROP VIEW IF EXISTS customer_balances;
+DROP VIEW IF EXISTS supplier_balances;
+
+CREATE VIEW customer_balances AS
 SELECT
   c.id,
   c.name,
@@ -33,7 +41,7 @@ LEFT JOIN (
   GROUP BY customer_id
 ) col ON col.customer_id = c.id;
 
-CREATE OR REPLACE VIEW supplier_balances AS
+CREATE VIEW supplier_balances AS
 SELECT
   s.id,
   s.name,
