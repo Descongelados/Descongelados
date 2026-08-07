@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   BarChart2,
   TrendingUp,
   TrendingDown,
@@ -212,6 +213,7 @@ export default function Reports() {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [limitReached, setLimitReached] = useState(false);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -231,10 +233,13 @@ export default function Reports() {
     setLoading(true);
     setError(null);
     setReportData(null);
+    setLimitReached(false);
 
     const end = `${to}T23:59:59`;
 
     // Un solo Promise.all — sale_items viene embebido en la query de sales
+    // Límite de 1000 ventas por reporte — evita descargar histórico ilimitado en rangos amplios
+    const REPORT_LIMIT = 1000;
     const [salesRes, collectionsRes, purchasesRes, spRes] = await Promise.all([
       supabase
         .from('sales')
@@ -242,7 +247,8 @@ export default function Reports() {
         .eq('status', 'confirmada')
         .gte('sale_date', from)
         .lte('sale_date', end)
-        .order('sale_date', { ascending: false }),
+        .order('sale_date', { ascending: false })
+        .limit(REPORT_LIMIT),
       supabase
         .from('collections')
         .select('amount, payment_method')
@@ -279,6 +285,7 @@ export default function Reports() {
       }))
     );
 
+    setLimitReached(sales.length === REPORT_LIMIT);
     setReportData({
       sales,
       collections: (collectionsRes.data ?? []) as CollectionRow[],
@@ -463,6 +470,15 @@ export default function Reports() {
           </button>
         </div>
       </div>
+
+      {limitReached && !loading && (
+        <div className="flex items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 mb-4 text-sm text-warning-800">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning-600" />
+          <span>
+            Se muestran las primeras <strong>1,000 ventas</strong> del período. Reduce el rango de fechas para ver todos los datos.
+          </span>
+        </div>
+      )}
 
       {loading && <FullPageLoader label="Generando reporte…" />}
       {error && (
