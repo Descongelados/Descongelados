@@ -173,13 +173,17 @@ export default function Sales() {
 
   const load = async () => {
     setLoading(true);
+    // Últimos 3 meses — evita descargar histórico completo de pendientes
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const threeMonthsAgoStr = threeMonthsAgo.toISOString().slice(0, 10);
 
     const [sRes, cRes, prodRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
-        // Mostrar todas las ventas pendientes de entrega sin importar la fecha
         .neq('delivery_status', 'entregado')
+        .gte('sale_date', threeMonthsAgoStr)
         .order('sale_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
       supabase.from('products').select('id, sku, name, sale_price, cost_price, stock, unit, is_active').order('name'),
