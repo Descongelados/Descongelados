@@ -194,8 +194,10 @@ export default function Sales() {
     } else {
       setSales(sRes.data as SaleRow[]);
     }
-    if (!cRes.error) setCustomers(cRes.data as Customer[]);
-    if (!prodRes.error) setProducts(prodRes.data as Product[]);
+    if (cRes.error) push('error', 'No se pudieron cargar los clientes');
+    else setCustomers(cRes.data as Customer[]);
+    if (prodRes.error) push('error', 'No se pudieron cargar los productos');
+    else setProducts(prodRes.data as Product[]);
     setLoading(false);
   };
 

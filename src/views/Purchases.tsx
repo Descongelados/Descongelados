@@ -221,9 +221,12 @@ export default function Purchases() {
     } else {
       setPurchases(pRes.data as PurchaseRow[]);
     }
-    if (!sRes.error) setSuppliers(sRes.data as Supplier[]);
-    if (!prodRes.error) setProducts(prodRes.data as Product[]);
-    if (!supPaysRes.error) {
+    if (sRes.error) push('error', 'No se pudieron cargar los proveedores');
+    else setSuppliers(sRes.data as Supplier[]);
+    if (prodRes.error) push('error', 'No se pudieron cargar los productos');
+    else setProducts(prodRes.data as Product[]);
+    if (supPaysRes.error) push('error', 'No se pudieron cargar los pagos a proveedores');
+    else {
       const pays = supPaysRes.data as PaymentRow[];
       setSupPayments(pays);
       setPaymentByPurchase(
@@ -234,7 +237,8 @@ export default function Purchases() {
         }))
       );
     }
-    if (!expRes.error) setExpenses((expRes.data ?? []) as BusinessExpense[]);
+    if (expRes.error) push('error', 'No se pudieron cargar los gastos');
+    else setExpenses((expRes.data ?? []) as BusinessExpense[]);
     setLoading(false);
   };
 

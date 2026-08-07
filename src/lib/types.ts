@@ -38,11 +38,15 @@ export type Supplier = {
   created_at: string;
 };
 
+export type PurchaseStatus = 'confirmada' | 'pendiente' | 'cancelada';
+export type PaymentMethod  = 'efectivo' | 'banco' | 'por_pagar';
+export type DeliveryStatus = 'pendiente' | 'entregado';
+
 export type Purchase = {
   id: string;
   supplier_id: string;
   invoice_number: string | null;
-  status: string;
+  status: PurchaseStatus;
   subtotal: number;
   tax: number;
   total: number;
@@ -60,12 +64,14 @@ export type PurchaseItem = {
   subtotal: number;
 };
 
+export type SaleStatus = 'confirmada' | 'pendiente' | 'cancelada';
+
 export type Sale = {
   id: string;
   customer_id: string;
   invoice_number: string | null;
-  status: string;
-  delivery_status: string;
+  status: SaleStatus;
+  delivery_status: DeliveryStatus;
   subtotal: number;
   tax: number;
   total: number;
@@ -86,7 +92,7 @@ export type SaleItem = {
 export type Delivery = {
   id: string;
   sale_id: string;
-  status: string;
+  status: DeliveryStatus;
   delivery_date: string | null;
   address: string | null;
   driver: string | null;
@@ -99,7 +105,7 @@ export type Collection = {
   customer_id: string;
   sale_id: string | null;
   amount: number;
-  payment_method: string;
+  payment_method: PaymentMethod;
   reference: string | null;
   collection_date: string;
   notes: string | null;
@@ -111,7 +117,7 @@ export type SupplierPayment = {
   supplier_id: string;
   purchase_id: string | null;
   amount: number;
-  payment_method: string;
+  payment_method: PaymentMethod;
   reference: string | null;
   payment_date: string;
   notes: string | null;

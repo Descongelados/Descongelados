@@ -248,6 +248,7 @@ const PAGE_SIZE = 100;
 function InventoryLogTab() {
   const [logs, setLogs] = useState<InventoryLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -266,6 +267,7 @@ function InventoryLogTab() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      setLoadError(false);
       const from = page * PAGE_SIZE;
       const to   = from + PAGE_SIZE - 1;
 
@@ -278,10 +280,15 @@ function InventoryLogTab() {
       if (actionFilter !== 'all') q = q.eq('action', actionFilter);
       if (debouncedSearch)        q = q.ilike('product_name', `%${debouncedSearch}%`);
 
-      const { data } = await q;
-      const rows = (data ?? []) as InventoryLog[];
-      setLogs(rows);
-      setHasMore(rows.length === PAGE_SIZE);
+      const { data, error } = await q;
+      if (error) {
+        setLoadError(true);
+        setLogs([]);
+      } else {
+        const rows = (data ?? []) as InventoryLog[];
+        setLogs(rows);
+        setHasMore(rows.length === PAGE_SIZE);
+      }
       setLoading(false);
     };
     load();
@@ -315,6 +322,12 @@ function InventoryLogTab() {
           </select>
         </div>
       </div>
+
+      {loadError && (
+        <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+          No se pudieron cargar los movimientos. Revisa la conexión e inténtalo de nuevo.
+        </div>
+      )}
 
       {/* Table */}
       <div className="card overflow-hidden">
