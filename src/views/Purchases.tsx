@@ -85,7 +85,8 @@ const emptyExpenseForm = (): ExpenseForm => ({
   notes: '',
 });
 
-const TAX_RATE = 0.16;
+// TAX_RATE se carga desde app_settings en load() — este valor es solo el fallback inicial
+let TAX_RATE = 0.16;
 
 type PaymentSplit = {
   efectivo: string;
@@ -186,7 +187,7 @@ export default function Purchases() {
     const mondayStr = monday.toISOString().slice(0, 10);
     const sundayStr = `${sunday.toISOString().slice(0, 10)}T23:59:59`;
 
-    const [pRes, sRes, prodRes, supPaysRes, expRes] = await Promise.all([
+    const [pRes, sRes, prodRes, supPaysRes, expRes, taxRes] = await Promise.all([
       supabase
         .from('purchases')
         .select('id, invoice_number, purchase_date, total, subtotal, tax, status, supplier_id, notes, created_at, supplier:suppliers(id, name)')
@@ -207,7 +208,14 @@ export default function Purchases() {
         .gte('expense_date', mondayStr)
         .lte('expense_date', sundayStr)
         .order('expense_date', { ascending: false }),
+      supabase.from('app_settings').select('value').eq('key', 'tax_rate').maybeSingle(),
     ]);
+    // Actualizar TAX_RATE desde BD si existe, si no mantener el fallback 0.16
+    if (!taxRes.error && taxRes.data) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rate = Number((taxRes.data.value as any)?.rate);
+      if (rate > 0) TAX_RATE = rate;
+    }
     if (pRes.error) {
       push('error', 'No se pudieron cargar las compras');
       setPurchases([]);
