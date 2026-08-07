@@ -428,72 +428,59 @@ export default function Purchases() {
       total: totals.total,
     };
 
-    const buildPayments = (purchaseId: string) => {
-      const rows: Array<{ supplier_id: string; purchase_id: string; amount: number; payment_method: string; payment_date: string }> = [];
-      const efectivoAmt = Number(payments.efectivo) || 0;
-      const bancoAmt = Number(payments.banco) || 0;
-      const paymentDate = fromDateInputValue(form.purchase_date);
-      if (efectivoAmt > 0) {
-        rows.push({ supplier_id: form.supplier_id, purchase_id: purchaseId, amount: efectivoAmt, payment_method: 'efectivo', payment_date: paymentDate });
-      }
-      if (bancoAmt > 0) {
-        rows.push({ supplier_id: form.supplier_id, purchase_id: purchaseId, amount: bancoAmt, payment_method: 'banco', payment_date: paymentDate });
-      }
-      return rows;
-    };
+    // Construir array de pagos para la RPC (efectivo + banco; por_pagar se omite)
+    const paymentDate = fromDateInputValue(form.purchase_date);
+    const paymentsPayload = [
+      { amount: Number(payments.efectivo) || 0, payment_method: 'efectivo', payment_date: paymentDate },
+      { amount: Number(payments.banco)    || 0, payment_method: 'banco',    payment_date: paymentDate },
+    ].filter((p) => p.amount > 0);
+
+    const itemsPayload = validItems.map((it) => ({
+      product_id: it.product_id,
+      quantity:   Number(it.quantity),
+      unit_cost:  Number(it.unit_cost),
+      subtotal:   Number(it.quantity) * Number(it.unit_cost),
+    }));
 
     if (editing) {
-      const { error } = await supabase.from('purchases').update(payload).eq('id', editing.id);
+      // RPC atómica: UPDATE + DELETE/INSERT items + DELETE/INSERT pagos
+      const { error } = await supabase.rpc('update_purchase', {
+        p_purchase_id:    editing.id,
+        p_supplier_id:    payload.supplier_id,
+        p_invoice_number: payload.invoice_number,
+        p_purchase_date:  payload.purchase_date,
+        p_notes:          payload.notes,
+        p_status:         payload.status,
+        p_subtotal:       payload.subtotal,
+        p_tax:            payload.tax,
+        p_total:          payload.total,
+        p_items:          itemsPayload,
+        p_payments:       paymentsPayload,
+      });
       if (error) {
         push('error', 'No se pudo actualizar la compra');
         setSaving(false);
         return;
       }
-      await supabase.from('purchase_items').delete().eq('purchase_id', editing.id);
-      await supabase.from('supplier_payments').delete().eq('purchase_id', editing.id);
-      const itemPayload = validItems.map((it) => ({
-        purchase_id: editing.id,
-        product_id: it.product_id,
-        quantity: Number(it.quantity),
-        unit_cost: Number(it.unit_cost),
-        subtotal: Number(it.quantity) * Number(it.unit_cost),
-      }));
-      const { error: itemErr } = await supabase.from('purchase_items').insert(itemPayload);
-      if (itemErr) {
-        push('error', 'No se guardaron los productos');
-        setSaving(false);
-        return;
-      }
-      const payRows = buildPayments(editing.id);
-      if (payRows.length > 0) {
-        const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
-        if (payErr) push('error', 'No se guardaron los pagos, pero la compra si se actualizo');
-      }
       push('success', 'Compra actualizada');
     } else {
-      const { data: created, error } = await supabase.from('purchases').insert(payload).select().single();
+      // RPC atómica: INSERT compra + items + pagos en una sola transacción
+      const { error } = await supabase.rpc('create_purchase', {
+        p_supplier_id:    payload.supplier_id,
+        p_invoice_number: payload.invoice_number,
+        p_purchase_date:  payload.purchase_date,
+        p_notes:          payload.notes,
+        p_status:         payload.status,
+        p_subtotal:       payload.subtotal,
+        p_tax:            payload.tax,
+        p_total:          payload.total,
+        p_items:          itemsPayload,
+        p_payments:       paymentsPayload,
+      });
       if (error) {
         push('error', 'No se pudo crear la compra');
         setSaving(false);
         return;
-      }
-      const itemPayload = validItems.map((it) => ({
-        purchase_id: created.id,
-        product_id: it.product_id,
-        quantity: Number(it.quantity),
-        unit_cost: Number(it.unit_cost),
-        subtotal: Number(it.quantity) * Number(it.unit_cost),
-      }));
-      const { error: itemErr } = await supabase.from('purchase_items').insert(itemPayload);
-      if (itemErr) {
-        push('error', 'No se guardaron los productos');
-        setSaving(false);
-        return;
-      }
-      const payRows = buildPayments(created.id);
-      if (payRows.length > 0) {
-        const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
-        if (payErr) push('error', 'No se guardaron los pagos, pero la compra si se registro');
       }
       push('success', 'Compra registrada');
     }
