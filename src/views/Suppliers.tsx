@@ -153,6 +153,9 @@ export default function Suppliers() {
       supabase.from('purchases').select('id, invoice_number, total, purchase_date, status').eq('supplier_id', s.id).order('purchase_date', { ascending: false }).limit(10),
       supabase.from('supplier_payments').select('id, amount, payment_date, payment_method, reference').eq('supplier_id', s.id).order('payment_date', { ascending: false }).limit(10),
     ]);
+    if (pRes.error || payRes.error) {
+      push('error', 'No se pudieron cargar los detalles del proveedor');
+    }
     setDetailPurchases((pRes.data as typeof detailPurchases) ?? []);
     setDetailPayments((payRes.data as typeof detailPayments) ?? []);
   };

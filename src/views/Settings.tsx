@@ -165,7 +165,12 @@ export default function SettingsView() {
         p_user_id:  newId,
         p_password: userForm.password.trim(),
       });
-      if (pwErr) { push('error', 'Usuario creado pero no se pudo guardar la contraseña'); return; }
+      if (pwErr) {
+        // Revertir: eliminar el usuario recién creado para no dejarlo sin contraseña
+        await supabase.from('app_users').delete().eq('id', newId);
+        push('error', 'No se pudo guardar la contraseña. Intenta de nuevo.');
+        return;
+      }
       push('success', 'Usuario creado');
     }
     setUserModal(false);

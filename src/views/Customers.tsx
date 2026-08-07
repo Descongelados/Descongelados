@@ -113,7 +113,7 @@ export default function Customers() {
       email: form.email.trim() || null,
       address: form.address.trim() || null,
       city: form.city.trim() || null,
-      credit_limit: Number(form.credit_limit) || 0,
+      credit_limit: Math.max(0, Number(form.credit_limit) || 0),
     };
     if (editing) {
       const { error } = await supabase.from('customers').update(payload).eq('id', editing.id);
@@ -153,6 +153,9 @@ export default function Customers() {
       supabase.from('sales').select('id, invoice_number, total, sale_date, status, delivery_status').eq('customer_id', c.id).order('sale_date', { ascending: false }).limit(10),
       supabase.from('collections').select('id, amount, collection_date, payment_method, reference, sale_id').eq('customer_id', c.id).order('collection_date', { ascending: false }).limit(10),
     ]);
+    if (salesRes.error || colRes.error) {
+      push('error', 'No se pudieron cargar los detalles del cliente');
+    }
     setDetailSales((salesRes.data as typeof detailSales) ?? []);
     setDetailCollections((colRes.data as typeof detailCollections) ?? []);
   };
@@ -210,6 +213,7 @@ export default function Customers() {
               </thead>
               <tbody className="divide-y divide-ink-100">
                 {filtered.map((c) => {
+                  // credit_limit = 0 significa "sin límite configurado" — no mostrar alerta
                   const overLimit = c.credit_limit > 0 && c.balance > c.credit_limit;
                   return (
                     <tr key={c.id} className="hover:bg-ink-50/60 transition">
@@ -416,7 +420,7 @@ export default function Customers() {
                         const realPaid = detailCollections
                           .filter((c) => c.sale_id === s.id && c.payment_method !== 'por_pagar')
                           .reduce((acc, c) => acc + c.amount, 0);
-                        const pendingCobro = s.delivery_status === 'entregado' && realPaid < s.total - 0.009;
+                        const pendingCobro = s.delivery_status === 'entregado' && (s.total - realPaid) > 0.01;
                         return (
                         <tr key={s.id}>
                           <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>

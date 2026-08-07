@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ShoppingCart,
   Plus,
@@ -85,9 +85,6 @@ const emptyExpenseForm = (): ExpenseForm => ({
   notes: '',
 });
 
-// TAX_RATE se carga desde app_settings en load() — este valor es solo el fallback inicial
-let TAX_RATE = 0.16;
-
 type PaymentSplit = {
   efectivo: string;
   banco: string;
@@ -123,6 +120,8 @@ const emptySupPayForm = (): SupPayForm => ({
 });
 
 export default function Purchases() {
+  // TAX_RATE se carga desde app_settings en load(); useRef evita que sea una variable de módulo mutable
+  const taxRateRef = useRef(0.16);
   const { can, currentUser } = useAuth();
   const canCreate = can('purchases:create');
   const canEdit   = can('purchases:edit');
@@ -210,11 +209,11 @@ export default function Purchases() {
         .order('expense_date', { ascending: false }),
       supabase.from('app_settings').select('value').eq('key', 'tax_rate').maybeSingle(),
     ]);
-    // Actualizar TAX_RATE desde BD si existe, si no mantener el fallback 0.16
+    // Actualizar taxRate desde BD si existe, si no mantener el fallback 0.16
     if (!taxRes.error && taxRes.data) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rate = Number((taxRes.data.value as any)?.rate);
-      if (rate > 0) TAX_RATE = rate;
+      if (rate > 0) taxRateRef.current = rate;
     }
     if (pRes.error) {
       push('error', 'No se pudieron cargar las compras');
@@ -280,7 +279,7 @@ export default function Purchases() {
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
-    const tax = form.has_tax ? subtotal * TAX_RATE : 0;
+    const tax = form.has_tax ? subtotal * taxRateRef.current : 0;
     return { subtotal, tax, total: subtotal + tax };
   }, [items, form.has_tax]);
 
