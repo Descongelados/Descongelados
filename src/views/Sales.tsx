@@ -324,7 +324,8 @@ export default function Sales() {
         })),
       });
       if (error) {
-        push('error', 'No se pudo actualizar la venta');
+        const msg = error.message?.includes('Stock insuficiente') ? error.message : 'No se pudo actualizar la venta';
+        push('error', msg);
         setSaving(false);
         return;
       }
@@ -351,7 +352,8 @@ export default function Sales() {
         })),
       });
       if (error) {
-        push('error', 'No se pudo crear la venta');
+        const msg = error.message?.includes('Stock insuficiente') ? error.message : 'No se pudo crear la venta';
+        push('error', msg);
         setSaving(false);
         return;
       }
