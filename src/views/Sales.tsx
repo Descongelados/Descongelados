@@ -301,23 +301,26 @@ export default function Sales() {
     };
 
     if (editing) {
-      const { error } = await supabase.from('sales').update(payload).eq('id', editing.id);
+      // RPC atómica: UPDATE sales + DELETE/INSERT sale_items en una sola transacción
+      const { error } = await supabase.rpc('update_sale', {
+        p_sale_id:        editing.id,
+        p_customer_id:    payload.customer_id,
+        p_invoice_number: payload.invoice_number,
+        p_sale_date:      payload.sale_date,
+        p_notes:          payload.notes,
+        p_status:         payload.status,
+        p_subtotal:       payload.subtotal,
+        p_tax:            payload.tax,
+        p_total:          payload.total,
+        p_items: validItems.map((it) => ({
+          product_id: it.product_id,
+          quantity:   Number(it.quantity),
+          unit_price: Number(it.unit_price),
+          subtotal:   Number(it.quantity) * Number(it.unit_price),
+        })),
+      });
       if (error) {
         push('error', 'No se pudo actualizar la venta');
-        setSaving(false);
-        return;
-      }
-      await supabase.from('sale_items').delete().eq('sale_id', editing.id);
-      const itemPayload = validItems.map((it) => ({
-        sale_id: editing.id,
-        product_id: it.product_id,
-        quantity: Number(it.quantity),
-        unit_price: Number(it.unit_price),
-        subtotal: Number(it.quantity) * Number(it.unit_price),
-      }));
-      const { error: itemErr } = await supabase.from('sale_items').insert(itemPayload);
-      if (itemErr) {
-        push('error', 'No se guardaron los productos');
         setSaving(false);
         return;
       }
