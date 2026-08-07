@@ -349,61 +349,49 @@ export default function Collections({ onDataChanged }: Props) {
     }
 
     if (!paymentTarget) return;
-    const balance = paymentTarget.total - (paidBySale.get(paymentTarget.id) ?? 0);
+
+    // Construir filas según método de pago
+    const baseDate = fromDateInputValue(paymentForm.payment_date);
+    let rows: Array<{ amount: number; payment_method: string }> = [];
 
     if (paymentForm.method === 'combinado') {
       const e = Number(paymentForm.efectivo) || 0;
       const b = Number(paymentForm.banco) || 0;
       const p = Number(paymentForm.por_pagar) || 0;
-      const total = e + b + p;
-      if (total <= 0) {
+      if (e + b + p <= 0) {
         push('error', 'El total combinado debe ser mayor a cero');
         return;
       }
-      if (total > balance + 0.01) {
-        push('error', `El total combinado excede el saldo pendiente (${formatCurrency(balance)})`);
+      if (e > 0) rows.push({ amount: e, payment_method: 'efectivo' });
+      if (b > 0) rows.push({ amount: b, payment_method: 'banco' });
+      if (p > 0) rows.push({ amount: p, payment_method: 'por_pagar' });
+    } else {
+      const amount = Number(paymentForm.amount);
+      if (!amount || amount <= 0) {
+        push('error', 'El monto debe ser mayor a cero');
         return;
       }
-      setSaving(true);
-      const baseDate = fromDateInputValue(paymentForm.payment_date);
-      const rows: Array<Record<string, unknown>> = [];
-      if (e > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: e, payment_method: 'efectivo', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
-      if (b > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: b, payment_method: 'banco', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
-      if (p > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: p, payment_method: 'por_pagar', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
-      const { error } = await supabase.from('collections').insert(rows);
-      if (error) push('error', 'No se pudo registrar el pago combinado');
-      else {
-        push('success', 'Pago combinado registrado');
-        setPaymentOpen(false);
-        await load();
-        onDataChanged?.();
-      }
-      setSaving(false);
-      return;
+      rows = [{ amount, payment_method: paymentForm.method }];
     }
 
-    const amount = Number(paymentForm.amount);
-    if (!amount || amount <= 0) {
-      push('error', 'El monto debe ser mayor a cero');
-      return;
-    }
-    if (amount > balance + 0.01) {
-      push('error', `El monto excede el saldo pendiente (${formatCurrency(balance)})`);
-      return;
-    }
     setSaving(true);
-    const { error } = await supabase.from('collections').insert({
-      customer_id: paymentTarget.customer_id,
-      sale_id: paymentTarget.id,
-      amount,
-      payment_method: paymentForm.method,
-      reference: paymentForm.reference.trim() || null,
-      collection_date: fromDateInputValue(paymentForm.payment_date),
-      notes: paymentForm.notes.trim() || null,
+    // RPC atómica: valida saldo en BD y hace todos los INSERTs en una transacción
+    const { error } = await supabase.rpc('register_collection', {
+      p_sale_id:         paymentTarget.id,
+      p_customer_id:     paymentTarget.customer_id,
+      p_collection_date: baseDate,
+      p_reference:       paymentForm.reference.trim(),
+      p_notes:           paymentForm.notes.trim(),
+      p_rows:            rows,
     });
-    if (error) push('error', 'No se pudo registrar el pago');
-    else {
-      push('success', 'Pago registrado');
+    if (error) {
+      // El mensaje de error de la RPC llega en error.message
+      const msg = error.message?.includes('excede el saldo')
+        ? error.message
+        : 'No se pudo registrar el pago';
+      push('error', msg);
+    } else {
+      push('success', paymentForm.method === 'combinado' ? 'Pago combinado registrado' : 'Pago registrado');
       setPaymentOpen(false);
       await load();
       onDataChanged?.();
