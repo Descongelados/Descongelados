@@ -1,4 +1,4 @@
-// v2 — company stored in Supabase app_settings
+// v3 — company cargada una sola vez en AuthContext
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Role, hasPermission, Permission } from './permissions';
 import { supabase } from './supabase';
@@ -50,14 +50,6 @@ export async function saveCompany(info: CompanyInfo): Promise<void> {
     .upsert({ key: 'company', value: info as unknown as Record<string, unknown> });
 }
 
-// ─── useCompany hook ─────────────────────────────────────────────────────────
-
-export function useCompany(): CompanyInfo {
-  const [company, setCompany] = useState<CompanyInfo>(DEFAULT_COMPANY);
-  useEffect(() => { loadCompany().then(setCompany); }, []);
-  return company;
-}
-
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 type AuthCtx = {
@@ -67,6 +59,9 @@ type AuthCtx = {
   logout: () => void;
   can: (permission: Permission) => boolean;
   isAdmin: boolean;
+  // company cargada una sola vez — compartida por todos los consumidores del contexto
+  company: CompanyInfo;
+  setCompany: (info: CompanyInfo) => void;
 };
 
 const AuthContext = createContext<AuthCtx>({
@@ -76,11 +71,17 @@ const AuthContext = createContext<AuthCtx>({
   logout: () => {},
   can: () => false,
   isAdmin: false,
+  company: { name: 'Mi Empresa', rfc: '', phone: '', address: '', logo: null },
+  setCompany: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [company, setCompany] = useState<CompanyInfo>(DEFAULT_COMPANY);
+
+  // Cargar company una sola vez al montar — todos los consumidores comparten este estado
+  useEffect(() => { loadCompany().then(setCompany); }, []);
 
   // Restore session on mount
   useEffect(() => {
@@ -145,10 +146,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = currentUser?.roles.includes('admin') ?? false;
 
   return (
-    <AuthContext.Provider value={{ currentUser, authLoading, login, logout, can, isAdmin }}>
+    <AuthContext.Provider value={{ currentUser, authLoading, login, logout, can, isAdmin, company, setCompany }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
 export const useAuth = () => useContext(AuthContext);
+
+// useCompany ahora consume del contexto — sin query extra
+export function useCompany(): CompanyInfo {
+  return useContext(AuthContext).company;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Settings,
   Building2,
@@ -16,7 +16,6 @@ import {
 import {
   AppUser,
   CompanyInfo,
-  loadCompany,
   saveCompany,
 } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -47,24 +46,20 @@ const emptyUserForm = (): UserForm => ({
 
 export default function SettingsView() {
   const { push } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, company, setCompany } = useAuth();
   const [tab, setTab] = useState<'empresa' | 'usuarios'>('empresa');
 
   // ── Company ──────────────────────────────────────────────────────────────
-  const [company, setCompany] = useState<CompanyInfo>({ name: 'Mi Empresa', rfc: '', phone: '', address: '', logo: null });
+  // company viene del AuthContext — ya cargado, sin query extra
   const [companySaving, setCompanySaving] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    loadCompany().then(setCompany);
-  }, []);
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 1_500_000) { push('error', 'El logo no debe superar 1.5 MB'); return; }
     const reader = new FileReader();
-    reader.onload = () => setCompany((c) => ({ ...c, logo: reader.result as string }));
+    reader.onload = () => setCompany({ ...company, logo: reader.result as string });
     reader.readAsDataURL(file);
   };
 
