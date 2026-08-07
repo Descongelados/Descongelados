@@ -391,10 +391,13 @@ export default function Sales() {
 
   const openDetail = async (s: SaleRow) => {
     setDetailOpen(s);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('sale_items')
       .select('id, product_id, quantity, unit_price, subtotal, product:products(id, sku, name, sale_price, cost_price, unit)')
       .eq('sale_id', s.id);
+    if (error) {
+      push('error', 'No se pudieron cargar los detalles de la venta');
+    }
     setDetailItems((data as (SaleItem & { product: Product | null })[]) ?? []);
   };
 

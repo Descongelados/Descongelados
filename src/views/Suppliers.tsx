@@ -46,6 +46,7 @@ export default function Suppliers() {
   const [editing, setEditing] = useState<SupplierBalance | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SupplierBalance | null>(null);
   const [detail, setDetail] = useState<SupplierBalance | null>(null);
   const [detailPurchases, setDetailPurchases] = useState<Array<{ id: string; invoice_number: string | null; total: number; purchase_date: string; status: string }>>([]);
@@ -117,16 +118,22 @@ export default function Suppliers() {
     };
     if (editing) {
       const { error } = await supabase.from('suppliers').update(payload).eq('id', editing.id);
-      if (error) push('error', 'No se pudo actualizar el proveedor');
-      else {
+      if (error) {
+        const msg = error.message?.toLowerCase().includes('unique') ? 'Ya existe un proveedor con esos datos'
+          : 'No se pudo actualizar el proveedor';
+        push('error', msg);
+      } else {
         push('success', 'Proveedor actualizado');
         setModalOpen(false);
         load();
       }
     } else {
       const { error } = await supabase.from('suppliers').insert(payload);
-      if (error) push('error', 'No se pudo crear el proveedor');
-      else {
+      if (error) {
+        const msg = error.message?.toLowerCase().includes('unique') ? 'Ya existe un proveedor con esos datos'
+          : 'No se pudo crear el proveedor';
+        push('error', msg);
+      } else {
         push('success', 'Proveedor creado');
         setModalOpen(false);
         load();
@@ -136,7 +143,8 @@ export default function Suppliers() {
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
     const { error } = await supabase.from('suppliers').delete().eq('id', deleteTarget.id);
     if (error) {
       push('error', 'No se pudo eliminar (tiene compras o pagos asociados)');
@@ -144,6 +152,7 @@ export default function Suppliers() {
       push('success', 'Proveedor eliminado');
       load();
     }
+    setDeleting(false);
     setDeleteTarget(null);
   };
 

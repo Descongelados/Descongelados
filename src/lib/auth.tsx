@@ -124,10 +124,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (username: string, password: string): Promise<boolean> => {
     // RPC verify_password: compara bcrypt en BD — nunca descarga el hash al cliente
-    const { data } = await supabase.rpc('verify_password', {
+    const { data, error } = await supabase.rpc('verify_password', {
       p_username: username.trim().toLowerCase(),
       p_password: password.trim(),
     });
+
+    if (error) throw new Error('connection');
 
     const result = data as VerifyPasswordResult | null;
     if (result?.ok) {
@@ -149,6 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('session_expired');
   };
 
   const can = (permission: Permission) =>

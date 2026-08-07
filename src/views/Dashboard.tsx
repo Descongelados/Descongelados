@@ -128,7 +128,8 @@ function Dashboard({ onNavigate }, ref) {
       .select('value')
       .eq('key', 'dashboard_cash_initial')
       .maybeSingle()
-      .then(({ data: row }) => {
+      .then(({ data: row, error }) => {
+        if (error) { push('error', 'No se pudo cargar el efectivo inicial'); return; }
         if (row) setCashInitial(Number((row.value as { amount: number }).amount) || 0);
       });
   }, []);
