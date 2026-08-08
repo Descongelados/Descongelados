@@ -248,7 +248,6 @@ const PAGE_SIZE = 100;
 function InventoryLogTab() {
   const [logs, setLogs] = useState<InventoryLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -267,7 +266,6 @@ function InventoryLogTab() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      setLoadError(false);
       const from = page * PAGE_SIZE;
       const to   = from + PAGE_SIZE - 1;
 
@@ -280,15 +278,10 @@ function InventoryLogTab() {
       if (actionFilter !== 'all') q = q.eq('action', actionFilter);
       if (debouncedSearch)        q = q.ilike('product_name', `%${debouncedSearch}%`);
 
-      const { data, error } = await q;
-      if (error) {
-        setLoadError(true);
-        setLogs([]);
-      } else {
-        const rows = (data ?? []) as InventoryLog[];
-        setLogs(rows);
-        setHasMore(rows.length === PAGE_SIZE);
-      }
+      const { data } = await q;
+      const rows = (data ?? []) as InventoryLog[];
+      setLogs(rows);
+      setHasMore(rows.length === PAGE_SIZE);
       setLoading(false);
     };
     load();
@@ -322,12 +315,6 @@ function InventoryLogTab() {
           </select>
         </div>
       </div>
-
-      {loadError && (
-        <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-          No se pudieron cargar los movimientos. Revisa la conexión e inténtalo de nuevo.
-        </div>
-      )}
 
       {/* Table */}
       <div className="card overflow-hidden">
@@ -439,7 +426,6 @@ export default function Inventory() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [tab, setTab] = useState<Tab>('list');
 
   const load = async () => {
@@ -482,16 +468,12 @@ export default function Inventory() {
   }, [products, search, categoryFilter, stockFilter]);
 
   const generateNextSku = async (): Promise<string> => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('products')
       .select('sku')
       .ilike('sku', 'PROD-%')
       .order('sku', { ascending: false })
       .limit(1);
-    if (error) {
-      push('error', 'No se pudo generar el SKU automático');
-      return 'PROD-0001';
-    }
     const lastSku = data?.[0]?.sku ?? 'PROD-0000';
     const num = parseInt(lastSku.replace(/PROD-/i, ''), 10) || 0;
     return `PROD-${String(num + 1).padStart(4, '0')}`;
@@ -523,7 +505,6 @@ export default function Inventory() {
   };
 
   const save = async () => {
-    if (saving) return;
     if (!form.name.trim()) {
       push('error', 'El nombre es obligatorio');
       return;
@@ -578,7 +559,7 @@ export default function Inventory() {
         if (error && error.message.includes('duplicate')) {
           attempt += 1;
           if (attempt >= 3) {
-            push('error', 'El SKU ya existe. Cambia el nombre o edita el SKU manualmente.');
+            push('error', 'No se pudo generar un SKU único. Inténtalo de nuevo.');
             break;
           }
           const nextSku = await generateNextSku();
@@ -609,8 +590,7 @@ export default function Inventory() {
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget || deleting) return;
-    setDeleting(true);
+    if (!deleteTarget) return;
     const { error } = await supabase.from('products').delete().eq('id', deleteTarget.id);
     if (error) {
       push('error', 'No se pudo eliminar (puede estar referenciado en compras/ventas)');
@@ -629,7 +609,6 @@ export default function Inventory() {
       push('success', 'Producto eliminado');
       load();
     }
-    setDeleting(false);
     setDeleteTarget(null);
   };
 
@@ -830,7 +809,7 @@ export default function Inventory() {
 
       <Modal
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditing(null); setForm(emptyForm); }}
+        onClose={() => setModalOpen(false)}
         title={editing ? 'Editar producto' : 'Nuevo producto'}
         description="Los cambios de stock se reflejan automáticamente en el inventario."
         size="lg"
@@ -860,7 +839,6 @@ export default function Inventory() {
             <label className="label">Nombre *</label>
             <input
               className="input"
-              maxLength={255}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Nombre del producto"
@@ -871,7 +849,6 @@ export default function Inventory() {
             <textarea
               className="input"
               rows={2}
-              maxLength={500}
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder="Descripción opcional"
@@ -882,7 +859,6 @@ export default function Inventory() {
             <input
               className="input"
               list="categories-list"
-              maxLength={100}
               value={form.category}
               onChange={(e) => setForm({ ...form, category: e.target.value })}
               placeholder="Ej. Bebidas"
@@ -897,7 +873,6 @@ export default function Inventory() {
             <label className="label">Unidad</label>
             <input
               className="input"
-              maxLength={50}
               value={form.unit}
               onChange={(e) => setForm({ ...form, unit: e.target.value })}
               placeholder="unidad, kg, lt…"

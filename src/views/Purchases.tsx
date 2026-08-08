@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ShoppingCart,
   Plus,
@@ -85,6 +85,8 @@ const emptyExpenseForm = (): ExpenseForm => ({
   notes: '',
 });
 
+const TAX_RATE = 0.16;
+
 type PaymentSplit = {
   efectivo: string;
   banco: string;
@@ -119,9 +121,19 @@ const emptySupPayForm = (): SupPayForm => ({
   notes: '',
 });
 
+function getWeekRange(): { monday: Date; sunday: Date } {
+  const now = new Date();
+  const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return { monday, sunday };
+}
+
 export default function Purchases() {
-  // TAX_RATE se carga desde app_settings en load(); useRef evita que sea una variable de módulo mutable
-  const taxRateRef = useRef(0.16);
   const { can, currentUser } = useAuth();
   const canCreate = can('purchases:create');
   const canEdit   = can('purchases:edit');
@@ -174,19 +186,11 @@ export default function Purchases() {
 
   const load = async () => {
     setLoading(true);
-    // Semana actual — lunes a domingo
-    const now = new Date();
-    const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() + diff);
-    monday.setHours(0, 0, 0, 0);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    sunday.setHours(23, 59, 59, 999);
+    const { monday, sunday } = getWeekRange();
     const mondayStr = monday.toISOString().slice(0, 10);
     const sundayStr = `${sunday.toISOString().slice(0, 10)}T23:59:59`;
 
-    const [pRes, sRes, prodRes, supPaysRes, expRes, taxRes] = await Promise.all([
+    const [pRes, sRes, prodRes, supPaysRes, expRes] = await Promise.all([
       supabase
         .from('purchases')
         .select('id, invoice_number, purchase_date, total, subtotal, tax, status, supplier_id, notes, created_at, supplier:suppliers(id, name)')
@@ -207,26 +211,16 @@ export default function Purchases() {
         .gte('expense_date', mondayStr)
         .lte('expense_date', sundayStr)
         .order('expense_date', { ascending: false }),
-      supabase.from('app_settings').select('value').eq('key', 'tax_rate').maybeSingle(),
     ]);
-    // Actualizar taxRate desde BD si existe, si no mantener el fallback 0.16
-    if (!taxRes.error && taxRes.data) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rate = Number((taxRes.data.value as any)?.rate);
-      if (rate > 0) taxRateRef.current = rate;
-    }
     if (pRes.error) {
       push('error', 'No se pudieron cargar las compras');
       setPurchases([]);
     } else {
       setPurchases(pRes.data as PurchaseRow[]);
     }
-    if (sRes.error) push('error', 'No se pudieron cargar los proveedores');
-    else setSuppliers(sRes.data as Supplier[]);
-    if (prodRes.error) push('error', 'No se pudieron cargar los productos');
-    else setProducts(prodRes.data as Product[]);
-    if (supPaysRes.error) push('error', 'No se pudieron cargar los pagos a proveedores');
-    else {
+    if (!sRes.error) setSuppliers(sRes.data as Supplier[]);
+    if (!prodRes.error) setProducts(prodRes.data as Product[]);
+    if (!supPaysRes.error) {
       const pays = supPaysRes.data as PaymentRow[];
       setSupPayments(pays);
       setPaymentByPurchase(
@@ -237,8 +231,7 @@ export default function Purchases() {
         }))
       );
     }
-    if (expRes.error) push('error', 'No se pudieron cargar los gastos');
-    else setExpenses((expRes.data ?? []) as BusinessExpense[]);
+    if (!expRes.error) setExpenses((expRes.data ?? []) as BusinessExpense[]);
     setLoading(false);
   };
 
@@ -283,7 +276,7 @@ export default function Purchases() {
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
-    const tax = form.has_tax ? subtotal * taxRateRef.current : 0;
+    const tax = form.has_tax ? subtotal * TAX_RATE : 0;
     return { subtotal, tax, total: subtotal + tax };
   }, [items, form.has_tax]);
 
@@ -369,7 +362,7 @@ export default function Purchases() {
   const openEdit = async (p: PurchaseRow) => {
     setEditing(p);
     const [itemsRes, paysRes] = await Promise.all([
-      supabase.from('purchase_items').select('id, product_id, quantity, unit_cost').eq('purchase_id', p.id),
+      supabase.from('purchase_items').select('*').eq('purchase_id', p.id),
       supabase.from('supplier_payments').select('amount, payment_method').eq('purchase_id', p.id),
     ]);
     setForm({
@@ -414,7 +407,6 @@ export default function Purchases() {
   };
 
   const save = async () => {
-    if (saving) return;
     if (!form.supplier_id) {
       push('error', 'Selecciona un proveedor');
       return;
@@ -440,62 +432,72 @@ export default function Purchases() {
       total: totals.total,
     };
 
-    // Construir array de pagos para la RPC (efectivo + banco; por_pagar se omite)
-    const paymentDate = fromDateInputValue(form.purchase_date);
-    const paymentsPayload = [
-      { amount: Number(payments.efectivo) || 0, payment_method: 'efectivo', payment_date: paymentDate },
-      { amount: Number(payments.banco)    || 0, payment_method: 'banco',    payment_date: paymentDate },
-    ].filter((p) => p.amount > 0);
-
-    const itemsPayload = validItems.map((it) => ({
-      product_id: it.product_id,
-      quantity:   Number(it.quantity),
-      unit_cost:  Number(it.unit_cost),
-      subtotal:   Number(it.quantity) * Number(it.unit_cost),
-    }));
+    const buildPayments = (purchaseId: string) => {
+      const rows: Array<{ supplier_id: string; purchase_id: string; amount: number; payment_method: string; payment_date: string }> = [];
+      const efectivoAmt = Number(payments.efectivo) || 0;
+      const bancoAmt = Number(payments.banco) || 0;
+      const paymentDate = fromDateInputValue(form.purchase_date);
+      if (efectivoAmt > 0) {
+        rows.push({ supplier_id: form.supplier_id, purchase_id: purchaseId, amount: efectivoAmt, payment_method: 'efectivo', payment_date: paymentDate });
+      }
+      if (bancoAmt > 0) {
+        rows.push({ supplier_id: form.supplier_id, purchase_id: purchaseId, amount: bancoAmt, payment_method: 'banco', payment_date: paymentDate });
+      }
+      return rows;
+    };
 
     if (editing) {
-      // RPC atómica: UPDATE + DELETE/INSERT items + DELETE/INSERT pagos
-      const { error } = await supabase.rpc('update_purchase', {
-        p_purchase_id:    editing.id,
-        p_supplier_id:    payload.supplier_id,
-        p_invoice_number: payload.invoice_number,
-        p_purchase_date:  payload.purchase_date,
-        p_notes:          payload.notes,
-        p_status:         payload.status,
-        p_subtotal:       payload.subtotal,
-        p_tax:            payload.tax,
-        p_total:          payload.total,
-        p_items:          itemsPayload,
-        p_payments:       paymentsPayload,
-      });
+      const { error } = await supabase.from('purchases').update(payload).eq('id', editing.id);
       if (error) {
-        const msg = error.message?.toLowerCase().includes('stock') ? error.message
-          : error.message?.toLowerCase().includes('saldo') ? error.message
-          : 'No se pudo actualizar la compra';
-        push('error', msg);
+        push('error', 'No se pudo actualizar la compra');
         setSaving(false);
         return;
       }
+      await supabase.from('purchase_items').delete().eq('purchase_id', editing.id);
+      await supabase.from('supplier_payments').delete().eq('purchase_id', editing.id);
+      const itemPayload = validItems.map((it) => ({
+        purchase_id: editing.id,
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        unit_cost: Number(it.unit_cost),
+        subtotal: Number(it.quantity) * Number(it.unit_cost),
+      }));
+      const { error: itemErr } = await supabase.from('purchase_items').insert(itemPayload);
+      if (itemErr) {
+        push('error', 'No se guardaron los productos');
+        setSaving(false);
+        return;
+      }
+      const payRows = buildPayments(editing.id);
+      if (payRows.length > 0) {
+        const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
+        if (payErr) push('error', 'No se guardaron los pagos, pero la compra si se actualizo');
+      }
       push('success', 'Compra actualizada');
     } else {
-      // RPC atómica: INSERT compra + items + pagos en una sola transacción
-      const { error } = await supabase.rpc('create_purchase', {
-        p_supplier_id:    payload.supplier_id,
-        p_invoice_number: payload.invoice_number,
-        p_purchase_date:  payload.purchase_date,
-        p_notes:          payload.notes,
-        p_status:         payload.status,
-        p_subtotal:       payload.subtotal,
-        p_tax:            payload.tax,
-        p_total:          payload.total,
-        p_items:          itemsPayload,
-        p_payments:       paymentsPayload,
-      });
+      const { data: created, error } = await supabase.from('purchases').insert(payload).select().single();
       if (error) {
         push('error', 'No se pudo crear la compra');
         setSaving(false);
         return;
+      }
+      const itemPayload = validItems.map((it) => ({
+        purchase_id: created.id,
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        unit_cost: Number(it.unit_cost),
+        subtotal: Number(it.quantity) * Number(it.unit_cost),
+      }));
+      const { error: itemErr } = await supabase.from('purchase_items').insert(itemPayload);
+      if (itemErr) {
+        push('error', 'No se guardaron los productos');
+        setSaving(false);
+        return;
+      }
+      const payRows = buildPayments(created.id);
+      if (payRows.length > 0) {
+        const { error: payErr } = await supabase.from('supplier_payments').insert(payRows);
+        if (payErr) push('error', 'No se guardaron los pagos, pero la compra si se registro');
       }
       push('success', 'Compra registrada');
     }
@@ -507,14 +509,9 @@ export default function Purchases() {
   const openDetail = async (p: PurchaseRow) => {
     setDetailOpen(p);
     const [itemsRes, paysRes] = await Promise.all([
-      supabase.from('purchase_items').select('id, product_id, quantity, unit_cost, subtotal, product:products(id, sku, name, cost_price, unit)').eq('purchase_id', p.id),
+      supabase.from('purchase_items').select('*, product:products(*)').eq('purchase_id', p.id),
       supabase.from('supplier_payments').select('amount, payment_method, payment_date').eq('purchase_id', p.id),
     ]);
-    if (itemsRes.error || paysRes.error) {
-      push('error', 'No se pudieron cargar los detalles de la compra');
-      setDetailOpen(null);
-      return;
-    }
     setDetailItems((itemsRes.data as (PurchaseItem & { product: Product | null })[]) ?? []);
     setDetailPayments((paysRes.data as Array<{ amount: number; payment_method: string; payment_date: string }>) ?? []);
   };
@@ -561,7 +558,6 @@ export default function Purchases() {
   };
 
   const saveSupPay = async () => {
-    if (savingSupPay) return;
     const amount = Number(supPayForm.amount);
     if (!supPayForm.supplier_id) {
       push('error', 'Selecciona un proveedor');
@@ -636,7 +632,6 @@ export default function Purchases() {
   };
 
   const saveExpense = async () => {
-    if (savingExpense) return;
     if (!expenseForm.description.trim()) {
       push('error', 'Escribe una descripcion del gasto');
       return;
@@ -1116,7 +1111,7 @@ export default function Purchases() {
       {/* Purchase create/edit modal */}
       <Modal
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditing(null); setForm({ supplier_id: '', invoice_number: '', purchase_date: toDateInputValue(new Date()), notes: '', status: 'confirmada', has_tax: true }); setItems([]); setPayments(emptyPayments); }}
+        onClose={() => setModalOpen(false)}
         title={editing ? 'Editar compra' : 'Nueva compra'}
         description="Los productos se agregan al inventario al guardar."
         size="xl"
@@ -1169,7 +1164,6 @@ export default function Purchases() {
               <input
                 className="input"
                 type="date"
-                max={toDateInputValue(new Date())}
                 value={form.purchase_date}
                 onChange={(e) => setForm({ ...form, purchase_date: e.target.value })}
               />
@@ -1480,13 +1474,13 @@ export default function Purchases() {
       {/* Register/edit supplier payment modal */}
       <Modal
         open={supPayOpen}
-        onClose={() => { setSupPayOpen(false); setSupPayForm(emptySupPayForm()); setEditingSupPay(null); }}
+        onClose={() => setSupPayOpen(false)}
         title={editingSupPay ? 'Editar pago a proveedor' : 'Registrar pago a proveedor'}
         description={editingSupPay ? 'Modifica los datos del pago' : 'Registra un pago por una compra a credito'}
         size="lg"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => { setSupPayOpen(false); setSupPayForm(emptySupPayForm()); setEditingSupPay(null); }} disabled={savingSupPay}>
+            <button className="btn-secondary" onClick={() => setSupPayOpen(false)} disabled={savingSupPay}>
               Cancelar
             </button>
             <button className="btn-success" onClick={saveSupPay} disabled={savingSupPay}>
@@ -1609,7 +1603,6 @@ export default function Purchases() {
               <input
                 className="input"
                 type="date"
-                max={toDateInputValue(new Date())}
                 value={supPayForm.payment_date}
                 onChange={(e) => setSupPayForm({ ...supPayForm, payment_date: e.target.value })}
               />
@@ -1621,7 +1614,6 @@ export default function Purchases() {
               <label className="label">Referencia</label>
               <input
                 className="input"
-                maxLength={100}
                 value={supPayForm.reference}
                 onChange={(e) => setSupPayForm({ ...supPayForm, reference: e.target.value })}
                 placeholder="Folio de transferencia, etc."
@@ -1631,7 +1623,6 @@ export default function Purchases() {
               <label className="label">Notas</label>
               <input
                 className="input"
-                maxLength={500}
                 value={supPayForm.notes}
                 onChange={(e) => setSupPayForm({ ...supPayForm, notes: e.target.value })}
                 placeholder="Notas internas"
@@ -1644,13 +1635,13 @@ export default function Purchases() {
       {/* Nuevo / Editar gasto extra */}
       <Modal
         open={expenseOpen}
-        onClose={() => { setExpenseOpen(false); setExpenseForm(emptyExpenseForm()); setEditingExpense(null); }}
+        onClose={() => setExpenseOpen(false)}
         title={editingExpense ? 'Editar gasto' : 'Registrar gasto extra'}
         description="Gastos operativos que no corresponden a compras de inventario"
         size="lg"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => { setExpenseOpen(false); setExpenseForm(emptyExpenseForm()); setEditingExpense(null); }} disabled={savingExpense}>
+            <button className="btn-secondary" onClick={() => setExpenseOpen(false)} disabled={savingExpense}>
               Cancelar
             </button>
             <button className="btn-primary" onClick={saveExpense} disabled={savingExpense}>
@@ -1687,7 +1678,6 @@ export default function Purchases() {
               <input
                 className="input"
                 type="date"
-                max={toDateInputValue(new Date())}
                 value={expenseForm.expense_date}
                 onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
               />
@@ -1785,7 +1775,6 @@ export default function Purchases() {
               <label className="label">Notas</label>
               <input
                 className="input"
-                maxLength={500}
                 value={expenseForm.notes}
                 onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
                 placeholder="Notas internas"

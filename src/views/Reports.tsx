@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   BarChart2,
   TrendingUp,
   TrendingDown,
@@ -74,12 +73,6 @@ type SaleRow = {
   tax: number;
   status: string;
   customer: { name: string; phone?: string } | null;
-  sale_items: {
-    quantity: number;
-    unit_price: number;
-    subtotal: number;
-    product: { name: string; cost_price: number } | null;
-  }[];
 };
 
 type CollectionRow = { amount: number; payment_method: string };
@@ -213,7 +206,6 @@ export default function Reports() {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [limitReached, setLimitReached] = useState(false);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -229,26 +221,21 @@ export default function Reports() {
     });
 
   const runReport = async () => {
-    if (loading || !from || !to) return;
+    if (!from || !to) return;
     setLoading(true);
     setError(null);
     setReportData(null);
-    setLimitReached(false);
 
     const end = `${to}T23:59:59`;
 
-    // Un solo Promise.all — sale_items viene embebido en la query de sales
-    // Límite de 1000 ventas por reporte — evita descargar histórico ilimitado en rangos amplios
-    const REPORT_LIMIT = 1000;
     const [salesRes, collectionsRes, purchasesRes, spRes] = await Promise.all([
       supabase
         .from('sales')
-        .select('id, invoice_number, sale_date, total, subtotal, tax, status, customer:customers(name, phone), sale_items(quantity, unit_price, subtotal, product:products(name, cost_price))')
+        .select('id, invoice_number, sale_date, total, subtotal, tax, status, customer:customers(name, phone)')
         .eq('status', 'confirmada')
         .gte('sale_date', from)
         .lte('sale_date', end)
-        .order('sale_date', { ascending: false })
-        .limit(REPORT_LIMIT),
+        .order('sale_date', { ascending: false }),
       supabase
         .from('collections')
         .select('amount, payment_method')
@@ -267,27 +254,38 @@ export default function Reports() {
         .lte('payment_date', end),
     ]);
 
+    // Fetch sale_items scoped to the sales in range — sale_date via JOIN a sales
+    let saleItems: SaleItemRow[] = [];
+    if (!salesRes.error && salesRes.data && salesRes.data.length > 0) {
+      const saleIds = salesRes.data.map((s) => s.id);
+      const { data: itemData } = await supabase
+        .from('sale_items')
+        .select('quantity, unit_price, subtotal, product:products(name, cost_price), sale:sales(sale_date)')
+        .in('sale_id', saleIds);
+
+      saleItems = ((itemData ?? []) as unknown as {
+        quantity: number;
+        unit_price: number;
+        subtotal: number;
+        product: { name: string; cost_price: number } | null;
+        sale: { sale_date: string } | null;
+      }[]).map((it) => ({
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        subtotal: it.subtotal,
+        sale_date: it.sale?.sale_date ?? from,
+        product: it.product,
+      }));
+    }
+
     if (salesRes.error || collectionsRes.error || purchasesRes.error || spRes.error) {
       setError('No se pudieron cargar los datos del reporte');
       setLoading(false);
       return;
     }
 
-    // Aplanar sale_items desde cada venta, preservando sale_date de la venta padre
-    const sales = (salesRes.data ?? []) as unknown as SaleRow[];
-    const saleItems: SaleItemRow[] = sales.flatMap((s) =>
-      (s.sale_items ?? []).map((it) => ({
-        quantity: it.quantity,
-        unit_price: it.unit_price,
-        subtotal: it.subtotal,
-        sale_date: s.sale_date,
-        product: it.product,
-      }))
-    );
-
-    setLimitReached(sales.length === REPORT_LIMIT);
     setReportData({
-      sales,
+      sales: (salesRes.data ?? []) as unknown as SaleRow[],
       collections: (collectionsRes.data ?? []) as CollectionRow[],
       purchases: (purchasesRes.data ?? []) as PurchaseRow[],
       supplierPayments: (spRes.data ?? []) as SupplierPaymentRow[],
@@ -470,15 +468,6 @@ export default function Reports() {
           </button>
         </div>
       </div>
-
-      {limitReached && !loading && (
-        <div className="flex items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 mb-4 text-sm text-warning-800">
-          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning-600" />
-          <span>
-            Se muestran las primeras <strong>1,000 ventas</strong> del período. Reduce el rango de fechas para ver todos los datos.
-          </span>
-        </div>
-      )}
 
       {loading && <FullPageLoader label="Generando reporte…" />}
       {error && (

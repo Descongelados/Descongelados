@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   DollarSign,
   ShoppingCart,
@@ -20,25 +20,8 @@ import PageHeader from '../components/ui/PageHeader';
 import Badge from '../components/ui/Badge';
 import { FullPageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
-import { useToast } from '../components/ui/Toast';
 import { ViewKey } from '../components/Sidebar';
 
-
-type KpisResult = {
-  total_sales: number;
-  total_purchases: number;
-  total_collected: number;
-  collected_cash: number;
-  collected_bank: number;
-  week_sales_collected: number;
-  bank_sales_collected: number;
-  total_to_collect: number;
-  total_to_pay: number;
-  cash_sales: number;
-  cash_expenses: number;
-  bank_expenses: number;
-  low_stock_count: number;
-};
 
 type DashboardData = {
   totalSales: number;
@@ -108,11 +91,7 @@ function currentWeekRange(): { mondayISO: string; sundayISO: string; label: stri
   return { mondayISO: toLocalISO(monday), sundayISO: toLocalISO(sunday), label };
 }
 
-export type DashboardHandle = { refresh: () => void };
-
-const Dashboard = forwardRef<DashboardHandle, { onNavigate: (view: ViewKey) => void }>(
-function Dashboard({ onNavigate }, ref) {
-  const { push } = useToast();
+export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,7 +99,6 @@ function Dashboard({ onNavigate }, ref) {
   const [cashInitial, setCashInitial] = useState<number>(0);
   const [editingCash, setEditingCash] = useState(false);
   const [cashDraft, setCashDraft] = useState('');
-  const [cashSaving, setCashSaving] = useState(false);
 
   useEffect(() => {
     supabase
@@ -128,8 +106,7 @@ function Dashboard({ onNavigate }, ref) {
       .select('value')
       .eq('key', 'dashboard_cash_initial')
       .maybeSingle()
-      .then(({ data: row, error }) => {
-        if (error) { push('error', 'No se pudo cargar el efectivo inicial'); return; }
+      .then(({ data: row }) => {
         if (row) setCashInitial(Number((row.value as { amount: number }).amount) || 0);
       });
   }, []);
@@ -140,77 +117,160 @@ function Dashboard({ onNavigate }, ref) {
   };
   const commitCash = async () => {
     const val = Math.max(0, Number(cashDraft) || 0);
-    setCashSaving(true);
-    const { error } = await supabase
-      .from('app_settings')
-      .upsert({ key: 'dashboard_cash_initial', value: { amount: val } });
-    setCashSaving(false);
-    if (error) {
-      push('error', 'No se pudo guardar el efectivo inicial');
-      return;
-    }
     setCashInitial(val);
     setEditingCash(false);
+    await supabase
+      .from('app_settings')
+      .upsert({ key: 'dashboard_cash_initial', value: { amount: val } });
   };
 
   const { mondayISO, sundayISO, label: weekLabel } = currentWeekRange();
 
-  const loadRef = useRef<() => Promise<void>>();
-
-  const load = async () => {
-    setData(null);
-
-    // Un solo Promise.all: RPC con todos los KPIs + 2 queries pequeñas de display
-    const [kpisRes, recentSalesRes, lowStockRes] = await Promise.all([
-      supabase.rpc('dashboard_kpis', {
-        p_week_from: mondayISO,
-        p_week_to:   sundayISO,
-      }),
-      supabase
-        .from('sales')
-        .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
-        .gte('sale_date', mondayISO)
-        .lte('sale_date', sundayISO)
-        .order('sale_date', { ascending: false })
-        .limit(10),
-      supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
-    ]);
-
-    if (kpisRes.error || recentSalesRes.error || lowStockRes.error) {
-      setError('No se pudieron cargar las métricas');
-      return;
-    }
-
-    const k = kpisRes.data as KpisResult;
-    const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
-
-    setData({
-      totalSales:          Number(k.total_sales),
-      totalPurchases:      Number(k.total_purchases),
-      totalCollected:      Number(k.total_collected),
-      collectedCash:       Number(k.collected_cash),
-      collectedBank:       Number(k.collected_bank),
-      weekSalesCollected:  Number(k.week_sales_collected),
-      bankSalesCollected:  Number(k.bank_sales_collected),
-      totalToCollect:      Number(k.total_to_collect),
-      totalToPay:          Number(k.total_to_pay),
-      cashSales:           Number(k.cash_sales),
-      cashExpenses:        Number(k.cash_expenses),
-      bankExpenses:        Number(k.bank_expenses),
-      lowStockCount:       Number(k.low_stock_count),
-      recentSales:         (recentSalesRes.data ?? []) as unknown as DashboardData['recentSales'],
-      lowStockProducts:    actualLowStock.slice(0, 5),
-    });
-  };
-
-  loadRef.current = load;
-
-  // Exponer refresh() al padre sin re-montar el componente
-  useImperativeHandle(ref, () => ({
-    refresh: () => { loadRef.current?.(); },
-  }), []);
-
   useEffect(() => {
+    const load = async () => {
+      setData(null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const applyWeek = (query: any, dateCol: string) =>
+        query.gte(dateCol, mondayISO).lte(dateCol, sundayISO);
+
+      // ── Fase 1: queries independientes (no necesitan IDs de otras tablas) ──
+      const [
+        salesRes,
+        purchasesRes,
+        collectionsRes,
+        supplierPaymentsRes,
+        lowStockRes,
+        recentSalesRes,
+        allWeekSalesRes,
+        allDeliveredSalesRes,
+        allPurchasesRes,
+      ] = await Promise.all([
+        applyWeek(supabase.from('sales').select('total').eq('status', 'confirmada'), 'sale_date'),
+        applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
+        applyWeek(supabase.from('collections').select('amount, payment_method'), 'collection_date'),
+        applyWeek(supabase.from('supplier_payments').select('amount, payment_method'), 'payment_date'),
+        supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
+        // Últimas 10 ventas para display
+        supabase
+          .from('sales')
+          .select('id, invoice_number, total, sale_date, status, customer:customers(name)')
+          .gte('sale_date', mondayISO)
+          .lte('sale_date', sundayISO)
+          .order('sale_date', { ascending: false })
+          .limit(10),
+        // Todos los IDs de ventas de la semana (sin límite) para calcular cobros
+        supabase
+          .from('sales')
+          .select('id')
+          .eq('status', 'confirmada')
+          .gte('sale_date', mondayISO)
+          .lte('sale_date', sundayISO),
+        // Ventas entregadas (sin límite de fecha) para calcular saldo por cobrar
+        supabase
+          .from('sales')
+          .select('id, total')
+          .eq('status', 'confirmada')
+          .eq('delivery_status', 'entregado'),
+        // Compras confirmadas (sin límite de fecha) para calcular saldo por pagar
+        supabase.from('purchases').select('id, total').eq('status', 'confirmada'),
+      ]);
+
+      if (salesRes.error || purchasesRes.error || collectionsRes.error || supplierPaymentsRes.error || lowStockRes.error) {
+        setError('No se pudieron cargar las métricas');
+        return;
+      }
+
+      // IDs necesarios para filtrar collections y supplier_payments en Fase 2
+      const deliveredSales = (allDeliveredSalesRes.data ?? []) as Array<{ id: string; total: number }>;
+      const allPurchases   = (allPurchasesRes.data      ?? []) as Array<{ id: string; total: number }>;
+
+      const deliveredSaleIds  = deliveredSales.map((s) => s.id);
+      // Usar query sin límite para tener TODOS los IDs de ventas de la semana
+      const weekSaleIds       = new Set(((allWeekSalesRes.data ?? []) as Array<{ id: string }>).map((s) => s.id));
+      const allPurchaseIds    = allPurchases.map((p) => p.id);
+
+      // IDs de ventas que necesitamos cobros: entregadas + semana actual (union)
+      const saleIdsForCollections = [...new Set([...deliveredSaleIds, ...weekSaleIds])];
+
+      // ── Fase 2: queries filtradas por IDs conocidos ──
+      const [allCollectionsRes, allSupPaymentsRes] = await Promise.all([
+        saleIdsForCollections.length > 0
+          ? supabase.from('collections').select('sale_id, amount, payment_method').in('sale_id', saleIdsForCollections)
+          : Promise.resolve({ data: [], error: null }),
+        allPurchaseIds.length > 0
+          ? supabase.from('supplier_payments').select('purchase_id, amount').in('purchase_id', allPurchaseIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      const sum = (rows: Array<{ total?: number; amount?: number }>) =>
+        rows.reduce((acc, r) => acc + (r.total ?? r.amount ?? 0), 0);
+
+      const totalSales = sum((salesRes.data ?? []) as Array<{ total: number }>);
+      const totalPurchases = sum((purchasesRes.data ?? []) as Array<{ total: number }>);
+
+      type PayRow = { amount: number; payment_method: string };
+      const collections = (collectionsRes.data ?? []) as PayRow[];
+      const supplierPayments = (supplierPaymentsRes.data ?? []) as PayRow[];
+
+      const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
+      const collectedCash  = collections.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0);
+      const collectedBank  = collections.filter((r) => r.payment_method === 'banco').reduce((s, r) => s + r.amount, 0);
+      const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
+
+      // gastos en efectivo = pagos a proveedores en efectivo esta semana
+      const cashExpenses = supplierPayments
+        .filter((r) => r.payment_method === 'efectivo')
+        .reduce((s, r) => s + r.amount, 0);
+
+      const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
+
+      // Saldo real por cobrar: suma de (total - cobrado) de ventas entregadas con saldo > 0
+      const colBySale = new Map<string, number>();
+      for (const c of (allCollectionsRes.data ?? []) as Array<{ sale_id: string | null; amount: number }>) {
+        if (c.sale_id) colBySale.set(c.sale_id, (colBySale.get(c.sale_id) ?? 0) + c.amount);
+      }
+      const totalToCollect = deliveredSales.reduce((acc, s) => {
+        const balance = s.total - (colBySale.get(s.id) ?? 0);
+        return acc + Math.max(0, balance);
+      }, 0);
+
+      // Saldo real por pagar: suma de (total - pagado) de compras con saldo > 0
+      const payByPurchase = new Map<string, number>();
+      for (const p of (allSupPaymentsRes.data ?? []) as Array<{ purchase_id: string | null; amount: number }>) {
+        if (p.purchase_id) payByPurchase.set(p.purchase_id, (payByPurchase.get(p.purchase_id) ?? 0) + p.amount);
+      }
+      const totalToPay = allPurchases.reduce((acc, p) => {
+        const balance = p.total - (payByPurchase.get(p.id) ?? 0);
+        return acc + Math.max(0, balance);
+      }, 0);
+
+      // Cobros de ventas creadas esta semana — efectivo y banco desde el mismo conjunto
+      type ColRow = { sale_id: string | null; amount: number; payment_method: string };
+      const weekCollections = (allCollectionsRes.data ?? [] as ColRow[])
+        .filter((c: ColRow) => c.sale_id && weekSaleIds.has(c.sale_id));
+      const weekSalesCollected  = weekCollections.reduce((s: number, c: ColRow) => s + c.amount, 0);
+      const cashSales           = weekCollections.filter((c: ColRow) => c.payment_method === 'efectivo').reduce((s: number, c: ColRow) => s + c.amount, 0);
+      const bankSalesCollected  = weekCollections.filter((c: ColRow) => c.payment_method === 'banco').reduce((s: number, c: ColRow) => s + c.amount, 0);
+      const bankExpenses        = totalPaid - cashExpenses;
+
+      setData({
+        totalSales,
+        totalPurchases,
+        totalCollected,
+        collectedCash,
+        collectedBank,
+        weekSalesCollected,
+        bankSalesCollected,
+        totalToCollect,
+        totalToPay,
+        cashSales,
+        cashExpenses,
+        bankExpenses,
+        lowStockCount: actualLowStock.length,
+        recentSales: (recentSalesRes.data ?? []) as unknown as DashboardData['recentSales'],
+        lowStockProducts: actualLowStock.slice(0, 5),
+      });
+    };
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -320,7 +380,7 @@ function Dashboard({ onNavigate }, ref) {
                       onKeyDown={(e) => { if (e.key === 'Enter') commitCash(); if (e.key === 'Escape') setEditingCash(false); }}
                       autoFocus
                     />
-                    <button onClick={commitCash} disabled={cashSaving} className="rounded-lg p-1.5 bg-success-50 text-success-600 hover:bg-success-100 transition disabled:opacity-50" title="Confirmar">
+                    <button onClick={commitCash} className="rounded-lg p-1.5 bg-success-50 text-success-600 hover:bg-success-100 transition" title="Confirmar">
                       <Check size={15} />
                     </button>
                   </div>
@@ -332,7 +392,7 @@ function Dashboard({ onNavigate }, ref) {
                     </button>
                   </div>
                 )}
-                <p className="text-[11px] text-ink-400 mt-1">Se guarda en configuración</p>
+                <p className="text-[11px] text-ink-400 mt-1">Editable · no se guarda en BD</p>
               </div>
 
               {/* Ventas en efectivo */}
@@ -439,6 +499,5 @@ function Dashboard({ onNavigate }, ref) {
       )}
     </div>
   );
-});
+}
 
-export default Dashboard;

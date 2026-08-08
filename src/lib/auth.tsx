@@ -1,25 +1,15 @@
-// v3 — company cargada una sola vez en AuthContext
+// v2 — company stored in Supabase app_settings
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Role, hasPermission, Permission } from './permissions';
 import { supabase } from './supabase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type VerifyPasswordResult = {
-  ok: boolean;
-  id: string;
-  name: string;
-  username: string;
-  roles: Role[];
-  active: boolean;
-  created_at: string;
-};
-
 export type AppUser = {
   id: string;
   name: string;
   username: string;
-  // password nunca se descarga al cliente — se gestiona vía RPC verify_password / set_user_password
+  password: string;
   roles: Role[];
   active: boolean;
   created_at: string;
@@ -60,6 +50,14 @@ export async function saveCompany(info: CompanyInfo): Promise<void> {
     .upsert({ key: 'company', value: info as unknown as Record<string, unknown> });
 }
 
+// ─── useCompany hook ─────────────────────────────────────────────────────────
+
+export function useCompany(): CompanyInfo {
+  const [company, setCompany] = useState<CompanyInfo>(DEFAULT_COMPANY);
+  useEffect(() => { loadCompany().then(setCompany); }, []);
+  return company;
+}
+
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 type AuthCtx = {
@@ -69,9 +67,6 @@ type AuthCtx = {
   logout: () => void;
   can: (permission: Permission) => boolean;
   isAdmin: boolean;
-  // company cargada una sola vez — compartida por todos los consumidores del contexto
-  company: CompanyInfo;
-  setCompany: (info: CompanyInfo) => void;
 };
 
 const AuthContext = createContext<AuthCtx>({
@@ -81,17 +76,11 @@ const AuthContext = createContext<AuthCtx>({
   logout: () => {},
   can: () => false,
   isAdmin: false,
-  company: { name: 'Mi Empresa', rfc: '', phone: '', address: '', logo: null },
-  setCompany: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [company, setCompany] = useState<CompanyInfo>(DEFAULT_COMPANY);
-
-  // Cargar company una sola vez al montar — todos los consumidores comparten este estado
-  useEffect(() => { loadCompany().then(setCompany); }, []);
 
   // Restore session on mount
   useEffect(() => {
@@ -101,16 +90,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (savedId) {
           const { data } = await supabase
             .from('app_users')
-            .select('id, name, username, roles, active, created_at')
+            .select('*')
             .eq('id', savedId)
             .eq('active', true)
             .maybeSingle();
           if (data) {
             setCurrentUser({ ...data, roles: data.roles as Role[] });
           } else {
-            // Usuario no encontrado o desactivado — limpiar sesión
             localStorage.removeItem(SESSION_KEY);
-            localStorage.setItem('session_expired', '1');
           }
         }
       } catch {
@@ -123,24 +110,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (username: string, password: string): Promise<boolean> => {
-    // RPC verify_password: compara bcrypt en BD — nunca descarga el hash al cliente
-    const { data, error } = await supabase.rpc('verify_password', {
-      p_username: username.trim().toLowerCase(),
-      p_password: password.trim(),
-    });
+    const { data: rows } = await supabase
+      .from('app_users')
+      .select('*')
+      .eq('active', true);
 
-    if (error) throw new Error('connection');
+    const normalUser = username.trim().toLowerCase();
+    const trimmedPass = password.trim();
+    const user = (rows ?? []).find(
+      (u) => u.username.toLowerCase() === normalUser && u.password === trimmedPass,
+    );
 
-    const result = data as VerifyPasswordResult | null;
-    if (result?.ok) {
-      const appUser: AppUser = {
-        id:         result.id,
-        name:       result.name,
-        username:   result.username,
-        roles:      result.roles,
-        active:     result.active,
-        created_at: result.created_at,
-      };
+    if (user) {
+      const appUser: AppUser = { ...user, roles: user.roles as Role[] };
       setCurrentUser(appUser);
       localStorage.setItem(SESSION_KEY, appUser.id);
       return true;
@@ -151,7 +133,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem('session_expired');
   };
 
   const can = (permission: Permission) =>
@@ -160,15 +141,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = currentUser?.roles.includes('admin') ?? false;
 
   return (
-    <AuthContext.Provider value={{ currentUser, authLoading, login, logout, can, isAdmin, company, setCompany }}>
+    <AuthContext.Provider value={{ currentUser, authLoading, login, logout, can, isAdmin }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
 export const useAuth = () => useContext(AuthContext);
-
-// useCompany ahora consume del contexto — sin query extra
-export function useCompany(): CompanyInfo {
-  return useContext(AuthContext).company;
-}

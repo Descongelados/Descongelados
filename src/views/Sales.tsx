@@ -173,17 +173,13 @@ export default function Sales() {
 
   const load = async () => {
     setLoading(true);
-    // Últimos 3 meses — evita descargar histórico completo de pendientes
-    const threeMonthsAgo = new Date();
-    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-    const threeMonthsAgoStr = threeMonthsAgo.toISOString().slice(0, 10);
 
     const [sRes, cRes, prodRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
+        // Mostrar todas las ventas pendientes de entrega sin importar la fecha
         .neq('delivery_status', 'entregado')
-        .gte('sale_date', threeMonthsAgoStr)
         .order('sale_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
       supabase.from('products').select('id, sku, name, sale_price, cost_price, stock, unit, is_active').order('name'),
@@ -194,10 +190,8 @@ export default function Sales() {
     } else {
       setSales(sRes.data as SaleRow[]);
     }
-    if (cRes.error) push('error', 'No se pudieron cargar los clientes');
-    else setCustomers(cRes.data as Customer[]);
-    if (prodRes.error) push('error', 'No se pudieron cargar los productos');
-    else setProducts(prodRes.data as Product[]);
+    if (!cRes.error) setCustomers(cRes.data as Customer[]);
+    if (!prodRes.error) setProducts(prodRes.data as Product[]);
     setLoading(false);
   };
 
@@ -245,7 +239,7 @@ export default function Sales() {
 
   const openEdit = async (s: SaleRow) => {
     setEditing(s);
-    const { data: existingItems } = await supabase.from('sale_items').select('id, product_id, quantity, unit_price').eq('sale_id', s.id);
+    const { data: existingItems } = await supabase.from('sale_items').select('*').eq('sale_id', s.id);
     setForm({
       customer_id: s.customer_id,
       invoice_number: s.invoice_number ?? '',
@@ -278,7 +272,6 @@ export default function Sales() {
   };
 
   const save = async () => {
-    if (saving) return;
     if (!form.customer_id) {
       push('error', 'Selecciona un cliente');
       return;
@@ -308,27 +301,23 @@ export default function Sales() {
     };
 
     if (editing) {
-      // RPC atómica: UPDATE sales + DELETE/INSERT sale_items en una sola transacción
-      const { error } = await supabase.rpc('update_sale', {
-        p_sale_id:        editing.id,
-        p_customer_id:    payload.customer_id,
-        p_invoice_number: payload.invoice_number,
-        p_sale_date:      payload.sale_date,
-        p_notes:          payload.notes,
-        p_status:         payload.status,
-        p_subtotal:       payload.subtotal,
-        p_tax:            payload.tax,
-        p_total:          payload.total,
-        p_items: validItems.map((it) => ({
-          product_id: it.product_id,
-          quantity:   Number(it.quantity),
-          unit_price: Number(it.unit_price),
-          subtotal:   Number(it.quantity) * Number(it.unit_price),
-        })),
-      });
+      const { error } = await supabase.from('sales').update(payload).eq('id', editing.id);
       if (error) {
-        const msg = error.message?.includes('Stock insuficiente') ? error.message : 'No se pudo actualizar la venta';
-        push('error', msg);
+        push('error', 'No se pudo actualizar la venta');
+        setSaving(false);
+        return;
+      }
+      await supabase.from('sale_items').delete().eq('sale_id', editing.id);
+      const itemPayload = validItems.map((it) => ({
+        sale_id: editing.id,
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        unit_price: Number(it.unit_price),
+        subtotal: Number(it.quantity) * Number(it.unit_price),
+      }));
+      const { error: itemErr } = await supabase.from('sale_items').insert(itemPayload);
+      if (itemErr) {
+        push('error', 'No se guardaron los productos');
         setSaving(false);
         return;
       }
@@ -337,50 +326,42 @@ export default function Sales() {
       load();
       setSaving(false);
     } else {
-      // RPC atómica: INSERT sales + INSERT sale_items en una sola transacción
-      const { data: rpcData, error } = await supabase.rpc('create_sale', {
-        p_customer_id:    payload.customer_id,
-        p_invoice_number: payload.invoice_number,
-        p_sale_date:      payload.sale_date,
-        p_notes:          payload.notes,
-        p_status:         payload.status,
-        p_subtotal:       payload.subtotal,
-        p_tax:            payload.tax,
-        p_total:          payload.total,
-        p_items: validItems.map((it) => ({
-          product_id: it.product_id,
-          quantity:   Number(it.quantity),
-          unit_price: Number(it.unit_price),
-          subtotal:   Number(it.quantity) * Number(it.unit_price),
-        })),
-      });
+      const { data: created, error } = await supabase.from('sales').insert(payload).select().single();
       if (error) {
-        const msg = error.message?.includes('Stock insuficiente') ? error.message : 'No se pudo crear la venta';
-        push('error', msg);
+        push('error', 'No se pudo crear la venta');
         setSaving(false);
         return;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = rpcData as any;
+      const itemPayload = validItems.map((it) => ({
+        sale_id: created.id,
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        unit_price: Number(it.unit_price),
+        subtotal: Number(it.quantity) * Number(it.unit_price),
+      }));
+      const { data: insertedItems, error: itemErr } = await supabase
+        .from('sale_items')
+        .insert(itemPayload)
+        .select();
+      if (itemErr) {
+        push('error', 'No se guardaron los productos');
+        setSaving(false);
+        return;
+      }
       push('success', 'Venta registrada');
       setModalOpen(false);
       setSaving(false);
-      load();
-      // Construir recibo con los datos devueltos por la RPC
+      load(); // refresh list in background
       const customer = customers.find((c) => c.id === form.customer_id) ?? null;
-      const createdSale = {
-        ...payload,
-        id: result.sale_id,
-        created_at: new Date().toISOString(),
-        delivery_status: 'pendiente',
-        customer,
-      } as unknown as SaleRow;
-      const builtReceiptItems: ReceiptItem[] = (result.items ?? []).map((dbItem: SaleItem) => ({
-        ...dbItem,
+      const row: SaleRow = { ...(created as Sale), customer };
+      // Construir los items con el objeto product completo para el recibo,
+      // usando los registros insertados (que tienen id de BD) y los productos en memoria.
+      const builtReceiptItems: ReceiptItem[] = (insertedItems ?? []).map((dbItem) => ({
+        ...(dbItem as SaleItem),
         product: products.find((p) => p.id === dbItem.product_id) ?? null,
       }));
       setReceiptItems(builtReceiptItems);
-      setReceiptSale(createdSale);
+      setReceiptSale(row);
     }
   };
 
@@ -391,13 +372,10 @@ export default function Sales() {
 
   const openDetail = async (s: SaleRow) => {
     setDetailOpen(s);
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('sale_items')
-      .select('id, product_id, quantity, unit_price, subtotal, product:products(id, sku, name, sale_price, cost_price, unit)')
+      .select('*, product:products(*)')
       .eq('sale_id', s.id);
-    if (error) {
-      push('error', 'No se pudieron cargar los detalles de la venta');
-    }
     setDetailItems((data as (SaleItem & { product: Product | null })[]) ?? []);
   };
 
@@ -553,7 +531,7 @@ export default function Sales() {
 
       <Modal
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditing(null); setForm({ customer_id: '', invoice_number: '', sale_date: toDateInputValue(new Date()), notes: '', status: 'confirmada' }); setItems([]); }}
+        onClose={() => setModalOpen(false)}
         title={editing ? 'Editar venta' : 'Nueva venta'}
         description="Los productos se descuentan del inventario al guardar."
         size="xl"
@@ -702,7 +680,6 @@ export default function Sales() {
               <textarea
                 className="input"
                 rows={2}
-                maxLength={500}
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 placeholder="Notas internas (opcional)"

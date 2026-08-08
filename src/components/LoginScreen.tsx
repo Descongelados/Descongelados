@@ -8,15 +8,11 @@ export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // Mostrar aviso si la sesión expiró o el usuario fue desactivado
-  const sessionExpired = localStorage.getItem('session_expired') === '1';
-  const [error, setError] = useState(sessionExpired ? 'Tu sesión expiró o tu usuario fue desactivado. Inicia sesión de nuevo.' : '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.removeItem('session_expired');
     setError('');
     setLoading(true);
     try {

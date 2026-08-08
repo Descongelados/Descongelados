@@ -55,7 +55,7 @@ export default function Customers() {
     setLoading(true);
     const { data, error } = await supabase
       .from('customer_balances')
-      .select('id, name, tax_id, phone, email, address, city, credit_limit, total_purchased, total_paid, balance')
+      .select('*')
       .order('name', { ascending: true });
     if (error) {
       push('error', 'No se pudo cargar los clientes');
@@ -93,7 +93,7 @@ export default function Customers() {
       tax_id: c.tax_id ?? '',
       phone: c.phone ?? '',
       email: c.email ?? '',
-      address: c.address ?? '',
+      address: '',
       city: c.city ?? '',
       credit_limit: String(c.credit_limit),
     });
@@ -113,28 +113,20 @@ export default function Customers() {
       email: form.email.trim() || null,
       address: form.address.trim() || null,
       city: form.city.trim() || null,
-      credit_limit: Math.max(0, Number(form.credit_limit) || 0),
+      credit_limit: Number(form.credit_limit) || 0,
     };
     if (editing) {
       const { error } = await supabase.from('customers').update(payload).eq('id', editing.id);
-      if (error) {
-        const msg = error.message?.toLowerCase().includes('email') ? 'El email ya está registrado'
-          : error.message?.toLowerCase().includes('unique') ? 'Ya existe un cliente con esos datos'
-          : 'No se pudo actualizar el cliente';
-        push('error', msg);
-      } else {
+      if (error) push('error', 'No se pudo actualizar el cliente');
+      else {
         push('success', 'Cliente actualizado');
         setModalOpen(false);
         load();
       }
     } else {
       const { error } = await supabase.from('customers').insert(payload);
-      if (error) {
-        const msg = error.message?.toLowerCase().includes('email') ? 'El email ya está registrado'
-          : error.message?.toLowerCase().includes('unique') ? 'Ya existe un cliente con esos datos'
-          : 'No se pudo crear el cliente';
-        push('error', msg);
-      } else {
+      if (error) push('error', 'No se pudo crear el cliente');
+      else {
         push('success', 'Cliente creado');
         setModalOpen(false);
         load();
@@ -161,9 +153,6 @@ export default function Customers() {
       supabase.from('sales').select('id, invoice_number, total, sale_date, status, delivery_status').eq('customer_id', c.id).order('sale_date', { ascending: false }).limit(10),
       supabase.from('collections').select('id, amount, collection_date, payment_method, reference, sale_id').eq('customer_id', c.id).order('collection_date', { ascending: false }).limit(10),
     ]);
-    if (salesRes.error || colRes.error) {
-      push('error', 'No se pudieron cargar los detalles del cliente');
-    }
     setDetailSales((salesRes.data as typeof detailSales) ?? []);
     setDetailCollections((colRes.data as typeof detailCollections) ?? []);
   };
@@ -221,7 +210,6 @@ export default function Customers() {
               </thead>
               <tbody className="divide-y divide-ink-100">
                 {filtered.map((c) => {
-                  // credit_limit = 0 significa "sin límite configurado" — no mostrar alerta
                   const overLimit = c.credit_limit > 0 && c.balance > c.credit_limit;
                   return (
                     <tr key={c.id} className="hover:bg-ink-50/60 transition">
@@ -278,7 +266,7 @@ export default function Customers() {
 
       <Modal
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditing(null); setForm(emptyForm); }}
+        onClose={() => setModalOpen(false)}
         title={editing ? 'Editar cliente' : 'Nuevo cliente'}
         size="lg"
         footer={
@@ -297,7 +285,6 @@ export default function Customers() {
             <label className="label">Nombre / Razón social *</label>
             <input
               className="input"
-              maxLength={255}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Ej. Distribuidora del Norte SA"
@@ -307,7 +294,6 @@ export default function Customers() {
             <label className="label">RFC / Tax ID</label>
             <input
               className="input"
-              maxLength={50}
               value={form.tax_id}
               onChange={(e) => setForm({ ...form, tax_id: e.target.value })}
               placeholder="Ej. ABC123456789"
@@ -317,7 +303,6 @@ export default function Customers() {
             <label className="label">Teléfono</label>
             <input
               className="input"
-              maxLength={20}
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
               placeholder="Ej. +52 55 1234 5678"
@@ -328,7 +313,6 @@ export default function Customers() {
             <input
               className="input"
               type="email"
-              maxLength={100}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               placeholder="cliente@correo.com"
@@ -338,7 +322,6 @@ export default function Customers() {
             <label className="label">Ciudad</label>
             <input
               className="input"
-              maxLength={100}
               value={form.city}
               onChange={(e) => setForm({ ...form, city: e.target.value })}
               placeholder="Ej. Monterrey, NL"
@@ -348,7 +331,6 @@ export default function Customers() {
             <label className="label">Dirección</label>
             <input
               className="input"
-              maxLength={255}
               value={form.address}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
               placeholder="Calle, número, colonia"
@@ -434,7 +416,7 @@ export default function Customers() {
                         const realPaid = detailCollections
                           .filter((c) => c.sale_id === s.id && c.payment_method !== 'por_pagar')
                           .reduce((acc, c) => acc + c.amount, 0);
-                        const pendingCobro = s.delivery_status === 'entregado' && (s.total - realPaid) > 0.01;
+                        const pendingCobro = s.delivery_status === 'entregado' && realPaid < s.total - 0.009;
                         return (
                         <tr key={s.id}>
                           <td className="table-cell font-mono text-xs">{s.invoice_number ?? '—'}</td>

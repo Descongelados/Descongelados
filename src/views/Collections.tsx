@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Truck,
   Wallet,
@@ -96,12 +96,9 @@ export default function Collections({ onDataChanged }: Props) {
   const canEdit = can('collections:edit');
   const { push } = useToast();
   const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas'>('entregas');
-  // taxRateRef: cargado desde app_settings en load() para no usar el 16% hardcodeado
-  const taxRateRef = useRef(0.16);
   const [sales, setSales] = useState<SaleRow[] | null>(null);
   const [collections, setCollections] = useState<CollectionRow[] | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [products, setProducts] = useState<{ id: string; name: string; cost_price: number; price: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -128,7 +125,7 @@ export default function Collections({ onDataChanged }: Props) {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
 
-    const [sRes, cRes, custRes, prodRes, taxRes] = await Promise.all([
+    const [sRes, cRes, custRes] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, delivery_status, customer_id, notes, created_at, customer:customers(id, name, phone)')
@@ -141,8 +138,6 @@ export default function Collections({ onDataChanged }: Props) {
         .gte('collection_date', sixMonthsAgoStr)
         .order('collection_date', { ascending: false }),
       supabase.from('customers').select('id, name, phone, tax_id, email, city, credit_limit, created_at').order('name'),
-      supabase.from('products').select('id, name, cost_price, price').order('name'),
-      supabase.from('app_settings').select('value').eq('key', 'tax_rate').maybeSingle(),
     ]);
     if (sRes.error) {
       push('error', 'No se pudieron cargar las ventas');
@@ -156,16 +151,7 @@ export default function Collections({ onDataChanged }: Props) {
     } else {
       setCollections(cRes.data as CollectionRow[]);
     }
-    if (custRes.error) push('error', 'No se pudieron cargar los clientes');
-    else setCustomers(custRes.data as Customer[]);
-    if (prodRes.error) push('error', 'No se pudieron cargar los productos');
-    else setProducts((prodRes.data ?? []) as { id: string; name: string; cost_price: number; price: number }[]);
-    // Cargar tax rate desde BD
-    if (!taxRes.error && taxRes.data) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rate = Number((taxRes.data.value as any)?.rate);
-      if (rate > 0) taxRateRef.current = rate;
-    }
+    if (!custRes.error) setCustomers(custRes.data as Customer[]);
     setLoading(false);
   };
 
@@ -329,7 +315,6 @@ export default function Collections({ onDataChanged }: Props) {
   }, [paymentForm.efectivo, paymentForm.banco, paymentForm.por_pagar]);
 
   const savePayment = async () => {
-    if (saving) return;
     if (editPayment) {
       const amount = Number(paymentForm.amount);
       if (!amount || amount <= 0) {
@@ -361,49 +346,61 @@ export default function Collections({ onDataChanged }: Props) {
     }
 
     if (!paymentTarget) return;
-
-    // Construir filas según método de pago
-    const baseDate = fromDateInputValue(paymentForm.payment_date);
-    let rows: Array<{ amount: number; payment_method: string }> = [];
+    const balance = paymentTarget.total - (paidBySale.get(paymentTarget.id) ?? 0);
 
     if (paymentForm.method === 'combinado') {
       const e = Number(paymentForm.efectivo) || 0;
       const b = Number(paymentForm.banco) || 0;
       const p = Number(paymentForm.por_pagar) || 0;
-      if (e + b + p <= 0) {
+      const total = e + b + p;
+      if (total <= 0) {
         push('error', 'El total combinado debe ser mayor a cero');
         return;
       }
-      if (e > 0) rows.push({ amount: e, payment_method: 'efectivo' });
-      if (b > 0) rows.push({ amount: b, payment_method: 'banco' });
-      if (p > 0) rows.push({ amount: p, payment_method: 'por_pagar' });
-    } else {
-      const amount = Number(paymentForm.amount);
-      if (!amount || amount <= 0) {
-        push('error', 'El monto debe ser mayor a cero');
+      if (total > balance + 0.01) {
+        push('error', `El total combinado excede el saldo pendiente (${formatCurrency(balance)})`);
         return;
       }
-      rows = [{ amount, payment_method: paymentForm.method }];
+      setSaving(true);
+      const baseDate = fromDateInputValue(paymentForm.payment_date);
+      const rows: Array<Record<string, unknown>> = [];
+      if (e > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: e, payment_method: 'efectivo', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
+      if (b > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: b, payment_method: 'banco', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
+      if (p > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: p, payment_method: 'por_pagar', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
+      const { error } = await supabase.from('collections').insert(rows);
+      if (error) push('error', 'No se pudo registrar el pago combinado');
+      else {
+        push('success', 'Pago combinado registrado');
+        setPaymentOpen(false);
+        await load();
+        onDataChanged?.();
+      }
+      setSaving(false);
+      return;
     }
 
+    const amount = Number(paymentForm.amount);
+    if (!amount || amount <= 0) {
+      push('error', 'El monto debe ser mayor a cero');
+      return;
+    }
+    if (amount > balance + 0.01) {
+      push('error', `El monto excede el saldo pendiente (${formatCurrency(balance)})`);
+      return;
+    }
     setSaving(true);
-    // RPC atómica: valida saldo en BD y hace todos los INSERTs en una transacción
-    const { error } = await supabase.rpc('register_collection', {
-      p_sale_id:         paymentTarget.id,
-      p_customer_id:     paymentTarget.customer_id,
-      p_collection_date: baseDate,
-      p_reference:       paymentForm.reference.trim(),
-      p_notes:           paymentForm.notes.trim(),
-      p_rows:            rows,
+    const { error } = await supabase.from('collections').insert({
+      customer_id: paymentTarget.customer_id,
+      sale_id: paymentTarget.id,
+      amount,
+      payment_method: paymentForm.method,
+      reference: paymentForm.reference.trim() || null,
+      collection_date: fromDateInputValue(paymentForm.payment_date),
+      notes: paymentForm.notes.trim() || null,
     });
-    if (error) {
-      // El mensaje de error de la RPC llega en error.message
-      const msg = error.message?.includes('excede el saldo')
-        ? error.message
-        : 'No se pudo registrar el pago';
-      push('error', msg);
-    } else {
-      push('success', paymentForm.method === 'combinado' ? 'Pago combinado registrado' : 'Pago registrado');
+    if (error) push('error', 'No se pudo registrar el pago');
+    else {
+      push('success', 'Pago registrado');
       setPaymentOpen(false);
       await load();
       onDataChanged?.();
@@ -443,17 +440,13 @@ export default function Collections({ onDataChanged }: Props) {
   // ── open edit-sale modal ──────────────────────────────────────────────────
 
   const openEditSale = async (sale: SaleRow) => {
-    // Products ya cargados en load() — solo fetch de sale_items de esta venta
-    setEditSaleProducts(products);
-    const { data: itemsData, error: itemsError } = await supabase
-      .from('sale_items')
-      .select('id, product_id, quantity, unit_price, has_tax, product:products(name, cost_price)')
-      .eq('sale_id', sale.id);
-    if (itemsError) {
-      push('error', 'No se pudieron cargar los productos de la venta');
-      return;
-    }
-    const itemsRes = { data: itemsData };
+    // Fetch products catalogue + existing sale_items in parallel
+    const [prodRes, itemsRes] = await Promise.all([
+      supabase.from('products').select('id, name, cost_price, price').order('name'),
+      supabase.from('sale_items').select('id, product_id, quantity, unit_price, has_tax, product:products(name, cost_price)').eq('sale_id', sale.id),
+    ]);
+    const prods = (prodRes.data ?? []) as { id: string; name: string; cost_price: number; price: number }[];
+    setEditSaleProducts(prods);
 
     const items: SaleItemEdit[] = ((itemsRes.data ?? []) as unknown as {
       id: string; product_id: string; quantity: number; unit_price: number; has_tax: boolean;
@@ -491,7 +484,7 @@ export default function Collections({ onDataChanged }: Props) {
     }
 
     const subtotal = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
-    const tax = editSaleForm.apply_tax ? subtotal * taxRateRef.current : 0;
+    const tax = editSaleForm.apply_tax ? subtotal * 0.16 : 0;
     const total = subtotal + tax;
 
     // Update parent sale
@@ -510,12 +503,7 @@ export default function Collections({ onDataChanged }: Props) {
     }
 
     // Delete existing items and re-insert
-    const { error: deleteErr } = await supabase.from('sale_items').delete().eq('sale_id', editSaleForm.sale_id);
-    if (deleteErr) {
-      push('error', 'No se pudieron actualizar los productos de la venta');
-      setSavingSale(false);
-      return;
-    }
+    await supabase.from('sale_items').delete().eq('sale_id', editSaleForm.sale_id);
 
     const newItems = items.map((it) => ({
       sale_id: editSaleForm.sale_id,
@@ -1040,7 +1028,7 @@ export default function Collections({ onDataChanged }: Props) {
 
       <Modal
         open={paymentOpen}
-        onClose={() => { setPaymentOpen(false); setPaymentForm(emptyPaymentForm()); setPaymentTarget(null); setEditPayment(null); }}
+        onClose={() => setPaymentOpen(false)}
         title={editPayment ? 'Editar pago' : 'Registrar pago'}
         description={
           paymentTarget
@@ -1050,7 +1038,7 @@ export default function Collections({ onDataChanged }: Props) {
         size="lg"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => { setPaymentOpen(false); setPaymentForm(emptyPaymentForm()); setPaymentTarget(null); setEditPayment(null); }} disabled={saving}>
+            <button className="btn-secondary" onClick={() => setPaymentOpen(false)} disabled={saving}>
               Cancelar
             </button>
             <button className="btn-success" onClick={savePayment} disabled={saving}>
@@ -1213,7 +1201,6 @@ export default function Collections({ onDataChanged }: Props) {
                 <input
                   className="input"
                   type="date"
-                  max={toDateInputValue(new Date())}
                   value={paymentForm.payment_date}
                   onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
                 />
@@ -1227,7 +1214,6 @@ export default function Collections({ onDataChanged }: Props) {
               <input
                 className="input"
                 type="date"
-                max={toDateInputValue(new Date())}
                 value={paymentForm.payment_date}
                 onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
               />
@@ -1239,7 +1225,6 @@ export default function Collections({ onDataChanged }: Props) {
               <label className="label">Referencia</label>
               <input
                 className="input"
-                maxLength={100}
                 value={paymentForm.reference}
                 onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
                 placeholder="Folio de transferencia, etc."
@@ -1249,7 +1234,6 @@ export default function Collections({ onDataChanged }: Props) {
               <label className="label">Notas</label>
               <input
                 className="input"
-                maxLength={500}
                 value={paymentForm.notes}
                 onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
                 placeholder="Notas internas"

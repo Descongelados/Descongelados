@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Settings,
   Building2,
@@ -16,6 +16,7 @@ import {
 import {
   AppUser,
   CompanyInfo,
+  loadCompany,
   saveCompany,
 } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -46,20 +47,24 @@ const emptyUserForm = (): UserForm => ({
 
 export default function SettingsView() {
   const { push } = useToast();
-  const { currentUser, company, setCompany } = useAuth();
+  const { currentUser } = useAuth();
   const [tab, setTab] = useState<'empresa' | 'usuarios'>('empresa');
 
   // ── Company ──────────────────────────────────────────────────────────────
-  // company viene del AuthContext — ya cargado, sin query extra
+  const [company, setCompany] = useState<CompanyInfo>({ name: 'Mi Empresa', rfc: '', phone: '', address: '', logo: null });
   const [companySaving, setCompanySaving] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    loadCompany().then(setCompany);
+  }, []);
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 1_500_000) { push('error', 'El logo no debe superar 1.5 MB'); return; }
     const reader = new FileReader();
-    reader.onload = () => setCompany({ ...company, logo: reader.result as string });
+    reader.onload = () => setCompany((c) => ({ ...c, logo: reader.result as string }));
     reader.readAsDataURL(file);
   };
 
@@ -78,15 +83,10 @@ export default function SettingsView() {
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [userForm, setUserForm] = useState<UserForm>(emptyUserForm());
   const [showPassword, setShowPassword] = useState(false);
-  const [savingUser, setSavingUser] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
 
   const refreshUsers = async () => {
-    // Excluir password del select — nunca debe viajar al cliente
-    const { data } = await supabase
-      .from('app_users')
-      .select('id, name, username, roles, active, created_at')
-      .order('created_at');
+    const { data } = await supabase.from('app_users').select('*').order('created_at');
     setUsers((data ?? []).map((u) => ({ ...u, roles: u.roles as Role[] })));
     setUsersLoading(false);
   };
@@ -102,8 +102,7 @@ export default function SettingsView() {
 
   const openEditUser = (u: AppUser) => {
     setEditingUser(u);
-    // password se deja vacío — solo se envía si el admin quiere cambiarla
-    setUserForm({ name: u.name, username: u.username, password: '', roles: [...u.roles], active: u.active });
+    setUserForm({ name: u.name, username: u.username, password: u.password, roles: [...u.roles], active: u.active });
     setShowPassword(false);
     setUserModal(true);
   };
@@ -116,7 +115,6 @@ export default function SettingsView() {
   };
 
   const saveUser = async () => {
-    if (savingUser) return;
     if (!userForm.name.trim()) { push('error', 'El nombre es obligatorio'); return; }
     if (!userForm.username.trim()) { push('error', 'El usuario es obligatorio'); return; }
     if (!editingUser && !userForm.password.trim()) { push('error', 'La contraseña es obligatoria'); return; }
@@ -130,79 +128,46 @@ export default function SettingsView() {
     );
     if (duplicate) { push('error', 'Ese nombre de usuario ya existe'); return; }
 
-    setSavingUser(true);
     if (editingUser) {
-      // Actualizar datos sin tocar el password
       const { error } = await supabase.from('app_users').update({
-        name:     userForm.name.trim(),
+        name: userForm.name.trim(),
         username: normalUsername,
-        roles:    userForm.roles,
-        active:   userForm.active,
+        password: userForm.password.trim() || editingUser.password,
+        roles: userForm.roles,
+        active: userForm.active,
       }).eq('id', editingUser.id);
-      if (error) { setSavingUser(false); push('error', 'Error al actualizar usuario'); return; }
-
-      // Si el admin escribió una nueva contraseña, actualizarla vía RPC (hashea en BD)
-      if (userForm.password.trim()) {
-        const { error: pwErr } = await supabase.rpc('set_user_password', {
-          p_user_id:  editingUser.id,
-          p_password: userForm.password.trim(),
-        });
-        if (pwErr) { setSavingUser(false); push('error', 'Usuario actualizado pero no se pudo cambiar la contraseña'); return; }
-      }
+      if (error) { push('error', 'Error al actualizar usuario'); return; }
       push('success', 'Usuario actualizado');
     } else {
-      // Crear usuario sin password — luego asignar hash vía RPC
-      const newId = crypto.randomUUID();
       const { error } = await supabase.from('app_users').insert({
-        id:         newId,
-        name:       userForm.name.trim(),
-        username:   normalUsername,
-        roles:      userForm.roles,
-        active:     userForm.active,
+        id: Date.now().toString(),
+        name: userForm.name.trim(),
+        username: normalUsername,
+        password: userForm.password.trim(),
+        roles: userForm.roles,
+        active: userForm.active,
         created_at: new Date().toISOString(),
       });
-      if (error) { setSavingUser(false); push('error', 'Error al crear usuario'); return; }
-
-      // Hashear y guardar contraseña en BD vía RPC
-      const { error: pwErr } = await supabase.rpc('set_user_password', {
-        p_user_id:  newId,
-        p_password: userForm.password.trim(),
-      });
-      if (pwErr) {
-        // Revertir: eliminar el usuario recién creado para no dejarlo sin contraseña
-        await supabase.from('app_users').delete().eq('id', newId);
-        setSavingUser(false);
-        push('error', 'No se pudo guardar la contraseña. Intenta de nuevo.');
-        return;
-      }
+      if (error) { push('error', 'Error al crear usuario'); return; }
       push('success', 'Usuario creado');
     }
-    setSavingUser(false);
     setUserModal(false);
-    setUserForm(emptyUserForm());
-    setEditingUser(null);
-    setShowPassword(false);
     await refreshUsers();
   };
 
-  const [deletingUser, setDeletingUser] = useState(false);
-
   const confirmDeleteUser = async () => {
-    if (!deleteTarget || deletingUser) return;
+    if (!deleteTarget) return;
     if (deleteTarget.id === currentUser?.id) { push('error', 'No puedes eliminar tu propio usuario'); setDeleteTarget(null); return; }
-    setDeletingUser(true);
     const { error } = await supabase.from('app_users').delete().eq('id', deleteTarget.id);
     if (error) { push('error', 'Error al eliminar usuario'); }
     else push('success', 'Usuario eliminado');
-    setDeletingUser(false);
     setDeleteTarget(null);
     await refreshUsers();
   };
 
   const toggleActive = async (u: AppUser) => {
     if (u.id === currentUser?.id) { push('error', 'No puedes desactivarte a ti mismo'); return; }
-    const { error } = await supabase.from('app_users').update({ active: !u.active }).eq('id', u.id);
-    if (error) { push('error', 'No se pudo cambiar el estado del usuario'); return; }
+    await supabase.from('app_users').update({ active: !u.active }).eq('id', u.id);
     await refreshUsers();
   };
 
@@ -267,21 +232,21 @@ export default function SettingsView() {
             <div className="space-y-4">
               <div>
                 <label className="label">Nombre de la empresa *</label>
-                <input className="input" maxLength={255} value={company.name} onChange={(e) => setCompany((c) => ({ ...c, name: e.target.value }))} placeholder="Nombre comercial" />
+                <input className="input" value={company.name} onChange={(e) => setCompany((c) => ({ ...c, name: e.target.value }))} placeholder="Nombre comercial" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="label">RFC</label>
-                  <input className="input" maxLength={50} value={company.rfc} onChange={(e) => setCompany((c) => ({ ...c, rfc: e.target.value }))} placeholder="XAXX010101000" />
+                  <input className="input" value={company.rfc} onChange={(e) => setCompany((c) => ({ ...c, rfc: e.target.value }))} placeholder="XAXX010101000" />
                 </div>
                 <div>
                   <label className="label">Teléfono</label>
-                  <input className="input" maxLength={20} value={company.phone} onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))} placeholder="55 0000 0000" />
+                  <input className="input" value={company.phone} onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))} placeholder="55 0000 0000" />
                 </div>
               </div>
               <div>
                 <label className="label">Dirección</label>
-                <input className="input" maxLength={255} value={company.address} onChange={(e) => setCompany((c) => ({ ...c, address: e.target.value }))} placeholder="Calle, número, colonia, ciudad" />
+                <input className="input" value={company.address} onChange={(e) => setCompany((c) => ({ ...c, address: e.target.value }))} placeholder="Calle, número, colonia, ciudad" />
               </div>
               <div className="flex justify-end">
                 <button className="btn-primary" onClick={saveCompanyInfo} disabled={companySaving}>
@@ -374,13 +339,13 @@ export default function SettingsView() {
       {/* ── User modal ── */}
       <Modal
         open={userModal}
-        onClose={() => { setUserModal(false); setUserForm(emptyUserForm()); setEditingUser(null); setShowPassword(false); }}
+        onClose={() => setUserModal(false)}
         title={editingUser ? 'Editar usuario' : 'Nuevo usuario'}
         size="md"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => { setUserModal(false); setUserForm(emptyUserForm()); setEditingUser(null); setShowPassword(false); }} disabled={savingUser}>Cancelar</button>
-            <button className="btn-primary" onClick={saveUser} disabled={savingUser}>{savingUser ? 'Guardando…' : 'Guardar'}</button>
+            <button className="btn-secondary" onClick={() => setUserModal(false)}>Cancelar</button>
+            <button className="btn-primary" onClick={saveUser}>Guardar</button>
           </>
         }
       >
@@ -388,11 +353,11 @@ export default function SettingsView() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Nombre completo *</label>
-              <input className="input" maxLength={255} value={userForm.name} onChange={(e) => setUserForm((f) => ({ ...f, name: e.target.value }))} placeholder="Nombre visible" />
+              <input className="input" value={userForm.name} onChange={(e) => setUserForm((f) => ({ ...f, name: e.target.value }))} placeholder="Nombre visible" />
             </div>
             <div>
               <label className="label">Usuario (login) *</label>
-              <input className="input" maxLength={50} value={userForm.username} onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))} placeholder="usuario123" autoCapitalize="none" />
+              <input className="input" value={userForm.username} onChange={(e) => setUserForm((f) => ({ ...f, username: e.target.value }))} placeholder="usuario123" autoCapitalize="none" />
             </div>
           </div>
           <div>
@@ -401,7 +366,6 @@ export default function SettingsView() {
               <input
                 className="input pr-10"
                 type={showPassword ? 'text' : 'password'}
-                maxLength={128}
                 value={userForm.password}
                 onChange={(e) => setUserForm((f) => ({ ...f, password: e.target.value }))}
                 placeholder="••••••••"

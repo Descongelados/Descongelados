@@ -46,7 +46,6 @@ export default function Suppliers() {
   const [editing, setEditing] = useState<SupplierBalance | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SupplierBalance | null>(null);
   const [detail, setDetail] = useState<SupplierBalance | null>(null);
   const [detailPurchases, setDetailPurchases] = useState<Array<{ id: string; invoice_number: string | null; total: number; purchase_date: string; status: string }>>([]);
@@ -94,7 +93,7 @@ export default function Suppliers() {
       tax_id: s.tax_id ?? '',
       phone: s.phone ?? '',
       email: s.email ?? '',
-      address: s.address ?? '',
+      address: '',
       city: s.city ?? '',
       contact: s.contact ?? '',
     });
@@ -118,22 +117,16 @@ export default function Suppliers() {
     };
     if (editing) {
       const { error } = await supabase.from('suppliers').update(payload).eq('id', editing.id);
-      if (error) {
-        const msg = error.message?.toLowerCase().includes('unique') ? 'Ya existe un proveedor con esos datos'
-          : 'No se pudo actualizar el proveedor';
-        push('error', msg);
-      } else {
+      if (error) push('error', 'No se pudo actualizar el proveedor');
+      else {
         push('success', 'Proveedor actualizado');
         setModalOpen(false);
         load();
       }
     } else {
       const { error } = await supabase.from('suppliers').insert(payload);
-      if (error) {
-        const msg = error.message?.toLowerCase().includes('unique') ? 'Ya existe un proveedor con esos datos'
-          : 'No se pudo crear el proveedor';
-        push('error', msg);
-      } else {
+      if (error) push('error', 'No se pudo crear el proveedor');
+      else {
         push('success', 'Proveedor creado');
         setModalOpen(false);
         load();
@@ -143,8 +136,7 @@ export default function Suppliers() {
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget || deleting) return;
-    setDeleting(true);
+    if (!deleteTarget) return;
     const { error } = await supabase.from('suppliers').delete().eq('id', deleteTarget.id);
     if (error) {
       push('error', 'No se pudo eliminar (tiene compras o pagos asociados)');
@@ -152,7 +144,6 @@ export default function Suppliers() {
       push('success', 'Proveedor eliminado');
       load();
     }
-    setDeleting(false);
     setDeleteTarget(null);
   };
 
@@ -162,9 +153,6 @@ export default function Suppliers() {
       supabase.from('purchases').select('id, invoice_number, total, purchase_date, status').eq('supplier_id', s.id).order('purchase_date', { ascending: false }).limit(10),
       supabase.from('supplier_payments').select('id, amount, payment_date, payment_method, reference').eq('supplier_id', s.id).order('payment_date', { ascending: false }).limit(10),
     ]);
-    if (pRes.error || payRes.error) {
-      push('error', 'No se pudieron cargar los detalles del proveedor');
-    }
     setDetailPurchases((pRes.data as typeof detailPurchases) ?? []);
     setDetailPayments((payRes.data as typeof detailPayments) ?? []);
   };
@@ -272,7 +260,7 @@ export default function Suppliers() {
 
       <Modal
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditing(null); setForm(emptyForm); }}
+        onClose={() => setModalOpen(false)}
         title={editing ? 'Editar proveedor' : 'Nuevo proveedor'}
         size="lg"
         footer={
@@ -291,7 +279,6 @@ export default function Suppliers() {
             <label className="label">Nombre / Razón social *</label>
             <input
               className="input"
-              maxLength={255}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Ej. Proveedora Industrial SA"
@@ -301,7 +288,6 @@ export default function Suppliers() {
             <label className="label">RFC / Tax ID</label>
             <input
               className="input"
-              maxLength={50}
               value={form.tax_id}
               onChange={(e) => setForm({ ...form, tax_id: e.target.value })}
             />
@@ -310,7 +296,6 @@ export default function Suppliers() {
             <label className="label">Contacto</label>
             <input
               className="input"
-              maxLength={100}
               value={form.contact}
               onChange={(e) => setForm({ ...form, contact: e.target.value })}
               placeholder="Nombre del vendedor"
@@ -320,7 +305,6 @@ export default function Suppliers() {
             <label className="label">Teléfono</label>
             <input
               className="input"
-              maxLength={20}
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
@@ -330,7 +314,6 @@ export default function Suppliers() {
             <input
               className="input"
               type="email"
-              maxLength={100}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
@@ -339,7 +322,6 @@ export default function Suppliers() {
             <label className="label">Ciudad</label>
             <input
               className="input"
-              maxLength={100}
               value={form.city}
               onChange={(e) => setForm({ ...form, city: e.target.value })}
             />
@@ -348,7 +330,6 @@ export default function Suppliers() {
             <label className="label">Dirección</label>
             <input
               className="input"
-              maxLength={255}
               value={form.address}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
             />
