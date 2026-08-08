@@ -885,22 +885,13 @@ export default function Collections({ onDataChanged }: Props) {
                         <td className="table-cell text-ink-500">{col.notes ?? '-'}</td>
                         {canEdit && (
                           <td className="table-cell text-right">
-                            <div className="inline-flex items-center gap-1">
-                              <button
-                                onClick={() => openEditCollectionPayment(col)}
-                                className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
-                                title="Modificar cobro"
-                              >
-                                <Pencil size={13} /> Modificar
-                              </button>
-                              <button
-                                onClick={() => setDeleteTarget(col)}
-                                className="inline-flex items-center gap-1 rounded-lg bg-danger-50 px-2.5 py-1.5 text-xs font-semibold text-danger-700 hover:bg-danger-100 transition"
-                                title="Eliminar cobro"
-                              >
-                                <Trash2 size={13} /> Eliminar
-                              </button>
-                            </div>
+                            <button
+                              onClick={() => openEditCollectionPayment(col)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                              title="Modificar cobro"
+                            >
+                              <Pencil size={13} /> Modificar
+                            </button>
                           </td>
                         )}
                       </tr>
