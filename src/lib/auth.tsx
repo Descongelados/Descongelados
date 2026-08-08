@@ -1,5 +1,6 @@
 // v2 — company stored in Supabase app_settings
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import bcrypt from 'bcryptjs';
 import { Role, hasPermission, Permission } from './permissions';
 import { supabase } from './supabase';
 
@@ -117,9 +118,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const normalUser = username.trim().toLowerCase();
     const trimmedPass = password.trim();
-    const user = (rows ?? []).find(
-      (u) => u.username.toLowerCase() === normalUser && u.password === trimmedPass,
+    const match = await Promise.all(
+      (rows ?? [])
+        .filter((u) => u.username.toLowerCase() === normalUser)
+        .map(async (u) => ({ u, ok: await bcrypt.compare(trimmedPass, u.password) })),
     );
+    const user = match.find((m) => m.ok)?.u;
 
     if (user) {
       const appUser: AppUser = { ...user, roles: user.roles as Role[] };
