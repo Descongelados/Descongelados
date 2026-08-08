@@ -10,9 +10,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/*.png'],
       manifest: {
-        name: 'Congelados · Gestión comercial',
+        name: 'Congelados - Gestion comercial',
         short_name: 'Congelados',
-        description: 'Sistema de gestión comercial para Congelados',
+        description: 'Sistema de gestion comercial para Congelados',
         theme_color: '#1d66f0',
         background_color: '#f6f7f9',
         display: 'standalone',
