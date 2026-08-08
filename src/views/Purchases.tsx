@@ -795,7 +795,7 @@ export default function Purchases() {
         </div>
       )}
 
-      <div className="flex items-center gap-1 mb-4 border-b border-ink-200">
+      <div className="flex items-center gap-1 mb-4 border-b border-ink-200 overflow-x-auto">
         <button
           onClick={() => { setTab('compras'); setSearch(''); setMethodFilter('all'); }}
           className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${

@@ -36,7 +36,7 @@ function AppShell() {
     <div className="flex min-h-screen bg-ink-50">
       <Sidebar current={view} onNavigate={setView} />
       <main className="flex-1 min-w-0 lg:pl-0">
-        <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 max-w-[1400px] mx-auto pt-16 lg:pt-8">
+        <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 max-w-[1400px] mx-auto pt-16 lg:pt-8 pl-16 sm:pl-6 lg:pl-8">
           {view === 'dashboard'   && <Dashboard key={dashboardKey} onNavigate={setView} />}
           {view === 'inventory'   && <Inventory />}
           {view === 'purchases'   && <Purchases />}

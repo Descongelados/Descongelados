@@ -176,7 +176,7 @@ export default function SettingsView() {
       <PageHeader title="Configuración" description="Empresa, usuarios y permisos" />
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mb-6 border-b border-ink-200">
+      <div className="flex items-center gap-1 mb-6 border-b border-ink-200 overflow-x-auto">
         <button
           onClick={() => setTab('empresa')}
           className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${tab === 'empresa' ? 'border-brand-600 text-brand-700' : 'border-transparent text-ink-500 hover:text-ink-700'}`}
