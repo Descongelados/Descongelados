@@ -68,7 +68,7 @@ const emptyPaymentForm = (): PaymentForm => ({
 
 type Props = { onDataChanged?: () => void };
 
-// ─── Edit-sale types ───────────────────────────────────────────────────────
+// ── Edit-sale types ──────────────────────────────────────────────────────────
 
 type SaleItemEdit = {
   id?: string;        // existing row id (undefined = new)
@@ -89,7 +89,7 @@ type EditSaleForm = {
   items: SaleItemEdit[];
 };
 
-// ─── component ────────────────────────────────────────────────────────────────
+// ── component ────────────────────────────────────────────────────────────────
 
 export default function Collections({ onDataChanged }: Props) {
   const { can, isAdmin } = useAuth();
@@ -112,7 +112,7 @@ export default function Collections({ onDataChanged }: Props) {
   const [confirmDelivery, setConfirmDelivery] = useState<SaleRow | null>(null);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
 
-  // ── edit-sale modal state ──────────────────────────────────────────────────
+  // ── edit-sale modal state ────────────────────────────────────────────────
   const [editSaleOpen, setEditSaleOpen] = useState(false);
   const [editSaleForm, setEditSaleForm] = useState<EditSaleForm | null>(null);
   const [editSaleProducts, setEditSaleProducts] = useState<{ id: string; name: string; cost_price: number; price: number }[]>([]);
@@ -120,7 +120,7 @@ export default function Collections({ onDataChanged }: Props) {
 
   const load = async () => {
     setLoading(true);
-    // Últimos 6 meses — evita descargar todo el histórico
+    // Últimos 6 meses – evita descargar todo el histórico
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
@@ -175,7 +175,7 @@ export default function Collections({ onDataChanged }: Props) {
   const paidBySale = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of collections ?? []) {
-      // 'por_pagar' es deuda registrada, no cobro real — no cuenta para el balance
+      // 'por_pagar' es deuda registrada, no cobro real – no cuenta para el balance
       if (c.sale_id && c.payment_method !== 'por_pagar') {
         map.set(c.sale_id, (map.get(c.sale_id) ?? 0) + c.amount);
       }
@@ -216,13 +216,13 @@ export default function Collections({ onDataChanged }: Props) {
     [salesWithBalance],
   );
 
-  // entregadas con saldo pendiente — acción requerida en Cobranza (ALL dates)
+  // entregadas con saldo pendiente – acción requerida en Cobranza (ALL dates)
   const pendingPaymentSales = useMemo(
     () => deliveredSalesAll.filter((s) => s.balance > 0.009),
     [deliveredSalesAll],
   );
 
-  // entregadas y totalmente pagadas — pestaña Ventas cobradas (current week only)
+  // entregadas y totalmente pagadas – pestaña Ventas cobradas (current week only)
   const paidSales = useMemo(
     () => deliveredSalesWeek.filter((s) => s.balance <= 0.009),
     [deliveredSalesWeek],
@@ -437,7 +437,7 @@ export default function Collections({ onDataChanged }: Props) {
     setDeleteTarget(null);
   };
 
-  // ── open edit-sale modal ──────────────────────────────────────────────────
+  // ── open edit-sale modal ─────────────────────────────────────────────────
 
   const openEditSale = async (sale: SaleRow) => {
     // Fetch products catalogue + existing sale_items in parallel
@@ -557,7 +557,7 @@ export default function Collections({ onDataChanged }: Props) {
     setEditSaleForm({ ...editSaleForm, items });
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────────────────────
 
   const selectedCustomer = customers.find((c) => c.id === paymentForm.customer_id);
   const targetBalance = paymentTarget
@@ -783,7 +783,7 @@ export default function Collections({ onDataChanged }: Props) {
             <div className="card overflow-hidden border-danger-200">
               <div className="flex items-center gap-2 px-5 py-3 border-b border-danger-100 bg-danger-50">
                 <AlertCircle size={16} className="text-danger-600" />
-                <h3 className="text-sm font-semibold text-danger-700">Requieren acción — Por cobrar</h3>
+                <h3 className="text-sm font-semibold text-danger-700">Requieren acción – Por cobrar</h3>
                 <span className="ml-auto rounded-full bg-danger-500 px-2 py-0.5 text-xs font-semibold text-white">
                   {pendingPaymentSales.length}
                 </span>
@@ -885,13 +885,22 @@ export default function Collections({ onDataChanged }: Props) {
                         <td className="table-cell text-ink-500">{col.notes ?? '-'}</td>
                         {canEdit && (
                           <td className="table-cell text-right">
-                            <button
-                              onClick={() => openEditCollectionPayment(col)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
-                              title="Modificar cobro"
-                            >
-                              <Pencil size={13} /> Modificar
-                            </button>
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                onClick={() => openEditCollectionPayment(col)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                                title="Modificar cobro"
+                              >
+                                <Pencil size={13} /> Modificar
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(col)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-danger-50 px-2.5 py-1.5 text-xs font-semibold text-danger-700 hover:bg-danger-100 transition"
+                                title="Eliminar cobro"
+                              >
+                                <Trash2 size={13} /> Eliminar
+                              </button>
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -1007,13 +1016,22 @@ export default function Collections({ onDataChanged }: Props) {
                         <td className="table-cell text-ink-500">{col.notes ?? '-'}</td>
                         {canEdit && (
                           <td className="table-cell text-right">
-                            <button
-                              onClick={() => openEditCollectionPayment(col)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
-                              title="Modificar cobro"
-                            >
-                              <Pencil size={13} /> Modificar
-                            </button>
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                onClick={() => openEditCollectionPayment(col)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                                title="Modificar cobro"
+                              >
+                                <Pencil size={13} /> Modificar
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(col)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-danger-50 px-2.5 py-1.5 text-xs font-semibold text-danger-700 hover:bg-danger-100 transition"
+                                title="Eliminar cobro"
+                              >
+                                <Trash2 size={13} /> Eliminar
+                              </button>
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -1094,7 +1112,7 @@ export default function Collections({ onDataChanged }: Props) {
                     .filter((s) => s.customer_id === paymentForm.customer_id)
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.invoice_number ?? 'Sin folio'} — {formatCurrency(s.total)}
+                        {s.invoice_number ?? 'Sin folio'} – {formatCurrency(s.total)}
                       </option>
                     ))}
                 </select>
@@ -1173,44 +1191,39 @@ export default function Collections({ onDataChanged }: Props) {
                   />
                 </div>
               </div>
-              <div className="flex justify-between rounded-lg bg-ink-50 p-3 text-sm">
+              <div className="rounded-lg bg-ink-50 p-2 text-sm flex justify-between">
                 <span className="text-ink-500">Total combinado</span>
-                <span className="font-bold text-ink-900">{formatCurrency(combinedTotal)}</span>
+                <span className={`font-bold ${combinedTotal > targetBalance + 0.01 ? 'text-danger-600' : 'text-success-600'}`}>
+                  {formatCurrency(combinedTotal)}
+                </span>
               </div>
-              {paymentTarget && combinedTotal > targetBalance + 0.01 && (
-                <p className="text-xs text-danger-600">
-                  El total combinado excede el saldo pendiente ({formatCurrency(targetBalance)}).
-                </p>
-              )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="label">Monto *</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={paymentForm.amount}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label">Fecha</label>
-                <input
-                  className="input"
-                  type="date"
-                  value={paymentForm.payment_date}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
-                />
-              </div>
+            <div>
+              <label className="label">Monto</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={paymentForm.amount}
+                onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+              />
             </div>
           )}
 
-          {paymentForm.method === 'combinado' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">Fecha</label>
+              <label className="label">Referencia / Número de cheque</label>
+              <input
+                className="input"
+                value={paymentForm.reference}
+                onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
+                placeholder="Opcional"
+              />
+            </div>
+            <div>
+              <label className="label">Fecha de pago</label>
               <input
                 className="input"
                 type="date"
@@ -1218,32 +1231,24 @@ export default function Collections({ onDataChanged }: Props) {
                 onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
               />
             </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Referencia</label>
-              <input
-                className="input"
-                value={paymentForm.reference}
-                onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
-                placeholder="Folio de transferencia, etc."
-              />
-            </div>
-            <div>
-              <label className="label">Notas</label>
-              <input
-                className="input"
-                value={paymentForm.notes}
-                onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
-                placeholder="Notas internas"
-              />
-            </div>
           </div>
 
-          {selectedCustomer && !paymentTarget && (
-            <div className="text-xs text-ink-500">
-              Cliente: <span className="font-semibold text-ink-700">{selectedCustomer.name}</span>
+          <div>
+            <label className="label">Notas</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={paymentForm.notes}
+              onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+              placeholder="Opcional"
+            />
+          </div>
+
+          {selectedCustomer && (
+            <div className="rounded-lg bg-ink-50 p-3 text-xs text-ink-500">
+              <span className="font-semibold text-ink-700">{selectedCustomer.name}</span>
+              {selectedCustomer.phone && <> · {selectedCustomer.phone}</>}
+              {selectedCustomer.city && <> · {selectedCustomer.city}</>}
             </div>
           )}
         </div>
@@ -1272,7 +1277,7 @@ export default function Collections({ onDataChanged }: Props) {
           open={editSaleOpen}
           onClose={() => { setEditSaleOpen(false); setEditSaleForm(null); }}
           title="Editar venta"
-          description={`Folio ${editSaleForm.invoice_number || '—'} · modifica productos y totales`}
+          description={`Folio: ${editSaleForm.invoice_number}`}
           size="xl"
           footer={
             <>
@@ -1285,15 +1290,21 @@ export default function Collections({ onDataChanged }: Props) {
             </>
           }
         >
-          <div className="space-y-5">
-
-            {/* date + customer */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="label">Folio</label>
+                <input
+                  className="input"
+                  value={editSaleForm.invoice_number}
+                  onChange={(e) => setEditSaleForm({ ...editSaleForm, invoice_number: e.target.value })}
+                />
+              </div>
               <div>
                 <label className="label">Fecha de venta</label>
                 <input
-                  type="date"
                   className="input"
+                  type="date"
                   value={editSaleForm.sale_date}
                   onChange={(e) => setEditSaleForm({ ...editSaleForm, sale_date: e.target.value })}
                 />
@@ -1305,7 +1316,6 @@ export default function Collections({ onDataChanged }: Props) {
                   value={editSaleForm.customer_id}
                   onChange={(e) => setEditSaleForm({ ...editSaleForm, customer_id: e.target.value })}
                 >
-                  <option value="">Selecciona…</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
@@ -1313,112 +1323,109 @@ export default function Collections({ onDataChanged }: Props) {
               </div>
             </div>
 
-            {/* IVA toggle */}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setEditSaleForm({ ...editSaleForm, apply_tax: !editSaleForm.apply_tax })}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${editSaleForm.apply_tax ? 'bg-brand-600' : 'bg-ink-300'}`}
-              >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${editSaleForm.apply_tax ? 'translate-x-6' : 'translate-x-1'}`} />
-              </button>
-              <span className="text-sm font-medium text-ink-700">Aplicar IVA 16%</span>
+            <div className="flex items-center gap-2">
+              <input
+                id="apply_tax"
+                type="checkbox"
+                checked={editSaleForm.apply_tax}
+                onChange={(e) => setEditSaleForm({ ...editSaleForm, apply_tax: e.target.checked })}
+                className="rounded border-ink-300"
+              />
+              <label htmlFor="apply_tax" className="text-sm font-medium text-ink-700">Aplicar IVA (16%)</label>
             </div>
 
-            {/* product lines */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="label mb-0">Productos</label>
-                <button type="button" onClick={addEditSaleItem} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700">
-                  <Plus size={14} /> Agregar línea
+                <button
+                  type="button"
+                  onClick={addEditSaleItem}
+                  className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
+                >
+                  <Plus size={13} /> Agregar producto
                 </button>
               </div>
-
-              <div className="rounded-lg border border-ink-200 overflow-hidden">
-                <table className="min-w-full divide-y divide-ink-100">
+              <div className="overflow-x-auto rounded-lg border border-ink-200">
+                <table className="min-w-full divide-y divide-ink-100 text-sm">
                   <thead className="bg-ink-50">
                     <tr>
                       <th className="table-head">Producto</th>
-                      <th className="table-head text-right w-24">Cant.</th>
-                      <th className="table-head text-right w-32">Precio unit.</th>
-                      <th className="table-head text-right w-32">Subtotal</th>
-                      <th className="table-head w-10"></th>
+                      <th className="table-head text-right">Cantidad</th>
+                      <th className="table-head text-right">Precio unit.</th>
+                      <th className="table-head text-right">Subtotal</th>
+                      <th className="table-head"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
-                    {editSaleForm.items.map((it, idx) => {
-                      const sub = Number(it.quantity) * Number(it.unit_price);
-                      return (
-                        <tr key={idx}>
-                          <td className="table-cell">
-                            <select
-                              className="input py-1 text-sm"
-                              value={it.product_id}
-                              onChange={(e) => updateEditSaleItem(idx, 'product_id', e.target.value)}
-                            >
-                              <option value="">Selecciona…</option>
-                              {editSaleProducts.map((p) => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="table-cell">
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              className="input py-1 text-sm text-right w-20"
-                              value={it.quantity}
-                              onChange={(e) => updateEditSaleItem(idx, 'quantity', e.target.value)}
-                            />
-                          </td>
-                          <td className="table-cell">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              className="input py-1 text-sm text-right w-28"
-                              value={it.unit_price}
-                              onChange={(e) => updateEditSaleItem(idx, 'unit_price', e.target.value)}
-                            />
-                          </td>
-                          <td className="table-cell text-right font-semibold text-ink-800">
-                            {formatCurrency(sub)}
-                          </td>
-                          <td className="table-cell">
-                            <button
-                              type="button"
-                              onClick={() => removeEditSaleItem(idx)}
-                              className="rounded p-1 text-ink-400 hover:text-danger-600 hover:bg-danger-50 transition"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {editSaleForm.items.map((item, idx) => (
+                      <tr key={idx}>
+                        <td className="table-cell">
+                          <select
+                            className="input text-xs py-1"
+                            value={item.product_id}
+                            onChange={(e) => updateEditSaleItem(idx, 'product_id', e.target.value)}
+                          >
+                            <option value="">Selecciona…</option>
+                            {editSaleProducts.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="table-cell">
+                          <input
+                            className="input text-xs py-1 text-right w-20"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={item.quantity}
+                            onChange={(e) => updateEditSaleItem(idx, 'quantity', e.target.value)}
+                          />
+                        </td>
+                        <td className="table-cell">
+                          <input
+                            className="input text-xs py-1 text-right w-24"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.unit_price}
+                            onChange={(e) => updateEditSaleItem(idx, 'unit_price', e.target.value)}
+                          />
+                        </td>
+                        <td className="table-cell text-right font-mono text-xs">
+                          {formatCurrency(Number(item.quantity) * Number(item.unit_price))}
+                        </td>
+                        <td className="table-cell text-right">
+                          <button
+                            type="button"
+                            onClick={() => removeEditSaleItem(idx)}
+                            className="rounded p-1 text-ink-400 hover:text-danger-600 hover:bg-danger-50 transition"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            {/* totals summary */}
-            {editSaleForm.items.length > 0 && (() => {
+            {(() => {
               const subtotal = editSaleForm.items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
               const tax = editSaleForm.apply_tax ? subtotal * 0.16 : 0;
               return (
-                <div className="rounded-lg bg-ink-50 p-4 space-y-1.5 text-sm">
-                  <div className="flex justify-between text-ink-600">
-                    <span>Subtotal</span>
-                    <span className="font-semibold text-ink-800">{formatCurrency(subtotal)}</span>
+                <div className="rounded-lg bg-ink-50 p-3 text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-ink-500">Subtotal</span>
+                    <span>{formatCurrency(subtotal)}</span>
                   </div>
                   {editSaleForm.apply_tax && (
-                    <div className="flex justify-between text-ink-600">
-                      <span>IVA (16%)</span>
-                      <span className="font-semibold text-ink-800">{formatCurrency(tax)}</span>
+                    <div className="flex justify-between">
+                      <span className="text-ink-500">IVA (16%)</span>
+                      <span>{formatCurrency(tax)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between border-t border-ink-200 pt-1.5 font-bold text-ink-900">
+                  <div className="flex justify-between font-bold border-t border-ink-200 pt-1">
                     <span>Total</span>
                     <span>{formatCurrency(subtotal + tax)}</span>
                   </div>
