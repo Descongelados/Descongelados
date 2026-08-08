@@ -1,6 +1,5 @@
 // v2 — company stored in Supabase app_settings
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { bcryptVerify } from './bcrypt';
 import { Role, hasPermission, Permission } from './permissions';
 import { supabase } from './supabase';
 
@@ -111,24 +110,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (username: string, password: string): Promise<boolean> => {
-    const { data: rows } = await supabase
-      .from('app_users')
-      .select('*')
-      .eq('active', true);
+    const { data, error } = await supabase.rpc('verify_login', {
+      p_username: username.trim().toLowerCase(),
+      p_password: password.trim(),
+    });
 
-    const normalUser = username.trim().toLowerCase();
-    const trimmedPass = password.trim();
-    const user = (rows ?? [])
-      .filter((u) => u.username.toLowerCase() === normalUser)
-      .find((u) => bcryptVerify(trimmedPass, u.password));
+    if (error || !data) return false;
 
-    if (user) {
-      const appUser: AppUser = { ...user, roles: user.roles as Role[] };
-      setCurrentUser(appUser);
-      localStorage.setItem(SESSION_KEY, appUser.id);
-      return true;
-    }
-    return false;
+    const user = data as AppUser & { roles: Role[] };
+    setCurrentUser(user);
+    localStorage.setItem(SESSION_KEY, user.id);
+    return true;
   };
 
   const logout = () => {
