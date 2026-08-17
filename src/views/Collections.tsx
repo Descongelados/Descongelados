@@ -68,10 +68,10 @@ const emptyPaymentForm = (): PaymentForm => ({
 
 type Props = { onDataChanged?: () => void };
 
-// ── Edit-sale types ──────────────────────────────────────────────────────────
+// ── Edit-sale types ─────────────────────────────────────────────────────────
 
 type SaleItemEdit = {
-  id?: string;        // existing row id (undefined = new)
+  id?: string;
   product_id: string;
   product_name: string;
   quantity: string;
@@ -89,18 +89,21 @@ type EditSaleForm = {
   items: SaleItemEdit[];
 };
 
-// ── component ────────────────────────────────────────────────────────────────
+// ── component ───────────────────────────────────────────────────────────────
 
 export default function Collections({ onDataChanged }: Props) {
   const { can, isAdmin } = useAuth();
   const canEdit = can('collections:edit');
   const { push } = useToast();
-  const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas'>('entregas');
+  const [tab, setTab] = useState<'entregas' | 'cobranza' | 'cobradas' | 'historial'>('entregas');
   const [sales, setSales] = useState<SaleRow[] | null>(null);
   const [collections, setCollections] = useState<CollectionRow[] | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo]     = useState('');
+  const [filterMethod, setFilterMethod]     = useState('');
 
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentTarget, setPaymentTarget] = useState<SaleRow | null>(null);
@@ -120,7 +123,6 @@ export default function Collections({ onDataChanged }: Props) {
 
   const load = async () => {
     setLoading(true);
-    // Últimos 6 meses – evita descargar todo el histórico
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
@@ -175,7 +177,6 @@ export default function Collections({ onDataChanged }: Props) {
   const paidBySale = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of collections ?? []) {
-      // 'por_pagar' es deuda registrada, no cobro real – no cuenta para el balance
       if (c.sale_id && c.payment_method !== 'por_pagar') {
         map.set(c.sale_id, (map.get(c.sale_id) ?? 0) + c.amount);
       }
@@ -191,7 +192,6 @@ export default function Collections({ onDataChanged }: Props) {
     }));
   }, [sales, paidBySale]);
 
-  // Sales within the current week (used for entregas + cobradas tabs)
   const salesWithBalanceWeek = useMemo(
     () => salesWithBalance.filter((s) => {
       const d = new Date(s.sale_date);
@@ -200,7 +200,6 @@ export default function Collections({ onDataChanged }: Props) {
     [salesWithBalance, weekStart, weekEnd],
   );
 
-  // Entregas pendientes: todas las fechas (no solo semana actual)
   const pendingDeliveries = useMemo(
     () => salesWithBalance.filter((s) => s.delivery_status === 'pendiente'),
     [salesWithBalance],
@@ -210,31 +209,26 @@ export default function Collections({ onDataChanged }: Props) {
     [salesWithBalanceWeek],
   );
 
-  // All delivered sales regardless of date - used for Cobranza (pending payment)
   const deliveredSalesAll = useMemo(
     () => salesWithBalance.filter((s) => s.delivery_status === 'entregado'),
     [salesWithBalance],
   );
 
-  // entregadas con saldo pendiente – acción requerida en Cobranza (ALL dates)
   const pendingPaymentSales = useMemo(
     () => deliveredSalesAll.filter((s) => s.balance > 0.009),
     [deliveredSalesAll],
   );
 
-  // entregadas y totalmente pagadas – pestaña Ventas cobradas (current week only)
   const paidSales = useMemo(
     () => deliveredSalesWeek.filter((s) => s.balance <= 0.009),
     [deliveredSalesWeek],
   );
 
-  // Registros de cobranza de ventas pendientes de pago (para la sección de historial en Cobranza)
   const pendingPaymentSaleIds = useMemo(
     () => new Set(pendingPaymentSales.map((s) => s.id)),
     [pendingPaymentSales],
   );
 
-  // Registros de cobranza de ventas ya pagadas (para pestaña Ventas cobradas)
   const paidSaleIds = useMemo(
     () => new Set(paidSales.map((s) => s.id)),
     [paidSales],
@@ -272,6 +266,25 @@ export default function Collections({ onDataChanged }: Props) {
     () => salesWithBalance.reduce((acc, s) => acc + Math.max(s.balance, 0), 0),
     [salesWithBalance],
   );
+
+  // ── Historial filtrado por rango de fechas y método ──────────────────────
+  const filteredHistory = useMemo(() => {
+    return (collections ?? []).filter((c) => {
+      const d = c.collection_date.slice(0, 10);
+      if (filterDateFrom && d < filterDateFrom) return false;
+      if (filterDateTo   && d > filterDateTo)   return false;
+      if (filterMethod   && c.payment_method !== filterMethod) return false;
+      return true;
+    });
+  }, [collections, filterDateFrom, filterDateTo, filterMethod]);
+
+  const historialTotals = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of filteredHistory) {
+      map.set(c.payment_method, (map.get(c.payment_method) ?? 0) + c.amount);
+    }
+    return map;
+  }, [filteredHistory]);
 
   const openRegisterPayment = (sale: SaleRow) => {
     setEditPayment(null);
@@ -437,10 +450,9 @@ export default function Collections({ onDataChanged }: Props) {
     setDeleteTarget(null);
   };
 
-  // ── open edit-sale modal ─────────────────────────────────────────────────
+  // ── open edit-sale modal ────────────────────────────────────────────────
 
   const openEditSale = async (sale: SaleRow) => {
-    // Fetch products catalogue + existing sale_items in parallel
     const [prodRes, itemsRes] = await Promise.all([
       supabase.from('products').select('id, name, cost_price, price').order('name'),
       supabase.from('sale_items').select('id, product_id, quantity, unit_price, has_tax, product:products(name, cost_price)').eq('sale_id', sale.id),
@@ -487,7 +499,6 @@ export default function Collections({ onDataChanged }: Props) {
     const tax = editSaleForm.apply_tax ? subtotal * 0.16 : 0;
     const total = subtotal + tax;
 
-    // Update parent sale
     const { error: saleErr } = await supabase.from('sales').update({
       customer_id: editSaleForm.customer_id,
       sale_date: fromDateInputValue(editSaleForm.sale_date),
@@ -502,7 +513,6 @@ export default function Collections({ onDataChanged }: Props) {
       return;
     }
 
-    // Delete existing items and re-insert
     await supabase.from('sale_items').delete().eq('sale_id', editSaleForm.sale_id);
 
     const newItems = items.map((it) => ({
@@ -672,6 +682,19 @@ export default function Collections({ onDataChanged }: Props) {
             {paidSales.length}
           </span>
         </button>
+        <button
+          onClick={() => setTab('historial')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition border-b-2 -mb-px ${
+            tab === 'historial'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-ink-500 hover:text-ink-700'
+          }`}
+        >
+          <Search size={16} /> Historial
+          <span className="ml-1 rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
+            {collections?.length ?? 0}
+          </span>
+        </button>
       </div>
 
       <div className="card p-4 mb-4">
@@ -695,12 +718,8 @@ export default function Collections({ onDataChanged }: Props) {
           ) : filteredDeliveries.length === 0 ? (
             <EmptyState
               icon={Truck}
-              title={tab === 'entregas' ? 'Sin entregas pendientes' : 'Sin entregas confirmadas'}
-              description={
-                tab === 'entregas'
-                  ? 'Las ventas confirmadas aparecerán aquí para confirmar su entrega.'
-                  : 'Aún no has confirmado entregas.'
-              }
+              title="Sin entregas pendientes"
+              description="Las ventas confirmadas aparecerán aquí para confirmar su entrega."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -778,12 +797,11 @@ export default function Collections({ onDataChanged }: Props) {
         </div>
       ) : tab === 'cobranza' ? (
         <div className="space-y-4">
-          {/* Ventas entregadas con saldo pendiente - requieren acción */}
           {pendingPaymentSales.length > 0 && (
             <div className="card overflow-hidden border-danger-200">
               <div className="flex items-center gap-2 px-5 py-3 border-b border-danger-100 bg-danger-50">
                 <AlertCircle size={16} className="text-danger-600" />
-                <h3 className="text-sm font-semibold text-danger-700">Requieren acción – Por cobrar</h3>
+                <h3 className="text-sm font-semibold text-danger-700">Requieren acción — Por cobrar</h3>
                 <span className="ml-auto rounded-full bg-danger-500 px-2 py-0.5 text-xs font-semibold text-white">
                   {pendingPaymentSales.length}
                 </span>
@@ -849,7 +867,6 @@ export default function Collections({ onDataChanged }: Props) {
             </div>
           )}
 
-          {/* Historial de cobros parciales de ventas pendientes */}
           {collectionsForPending.length > 0 && (
             <div className="card overflow-hidden">
               <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-ink-50">
@@ -921,8 +938,7 @@ export default function Collections({ onDataChanged }: Props) {
             </div>
           )}
         </div>
-      ) : (
-        /* ── Pestaña: Ventas cobradas ── */
+      ) : tab === 'cobradas' ? (
         <div className="space-y-4">
           <div className="card overflow-hidden">
             {loading ? (
@@ -980,7 +996,6 @@ export default function Collections({ onDataChanged }: Props) {
             )}
           </div>
 
-          {/* Detalle de cobros de ventas ya pagadas */}
           {collectionsForPaid.length > 0 && (
             <div className="card overflow-hidden">
               <div className="flex items-center gap-2 px-5 py-3 border-b border-ink-100 bg-success-50">
@@ -1041,6 +1056,138 @@ export default function Collections({ onDataChanged }: Props) {
               </div>
             </div>
           )}
+        </div>
+      ) : (
+        /* ── Pestaña: Historial de cobros ── */
+        <div className="space-y-4">
+          {/* Filtros */}
+          <div className="card p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap">
+              <div className="flex flex-col gap-1">
+                <label className="label mb-0">Desde</label>
+                <input
+                  className="input"
+                  type="date"
+                  value={filterDateFrom}
+                  onChange={(e) => setFilterDateFrom(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="label mb-0">Hasta</label>
+                <input
+                  className="input"
+                  type="date"
+                  value={filterDateTo}
+                  onChange={(e) => setFilterDateTo(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="label mb-0">Método de pago</label>
+                <select
+                  className="input"
+                  value={filterMethod}
+                  onChange={(e) => setFilterMethod(e.target.value)}
+                >
+                  <option value="">Todos</option>
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              {(filterDateFrom || filterDateTo || filterMethod) && (
+                <button
+                  className="btn-secondary self-end"
+                  onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterMethod(''); }}
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Resumen de totales */}
+          {filteredHistory.length > 0 && (
+            <div className="card p-4">
+              <p className="text-xs font-semibold text-ink-500 uppercase mb-3">Totales por método</p>
+              <div className="flex flex-wrap gap-3">
+                {Array.from(historialTotals.entries()).map(([method, total]) => (
+                  <div key={method} className="flex items-center gap-2 rounded-lg bg-ink-50 border border-ink-200 px-4 py-2">
+                    <span className="text-sm font-medium capitalize text-ink-700">{method}</span>
+                    <span className="text-sm font-bold text-success-700">{formatCurrency(total)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-2 rounded-lg bg-brand-50 border border-brand-200 px-4 py-2">
+                  <span className="text-sm font-semibold text-brand-700">Total general</span>
+                  <span className="text-sm font-bold text-brand-700">
+                    {formatCurrency(filteredHistory.reduce((a, c) => a + c.amount, 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tabla */}
+          <div className="card overflow-hidden">
+            {loading ? (
+              <FullPageLoader />
+            ) : filteredHistory.length === 0 ? (
+              <EmptyState
+                icon={Search}
+                title="Sin resultados"
+                description="Ajusta los filtros para encontrar cobros."
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-ink-100">
+                  <thead className="bg-ink-50/60">
+                    <tr>
+                      <th className="table-head">Fecha</th>
+                      <th className="table-head">Cliente</th>
+                      <th className="table-head">Folio venta</th>
+                      <th className="table-head">Método</th>
+                      <th className="table-head text-right">Monto</th>
+                      <th className="table-head">Referencia</th>
+                      <th className="table-head">Notas</th>
+                      {canEdit && <th className="table-head text-right">Acciones</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {filteredHistory.map((col) => (
+                      <tr key={col.id} className="hover:bg-ink-50/60 transition">
+                        <td className="table-cell">{formatDate(col.collection_date)}</td>
+                        <td className="table-cell font-semibold text-ink-900">{col.customer?.name ?? '-'}</td>
+                        <td className="table-cell font-mono text-xs">{col.sale?.invoice_number ?? '-'}</td>
+                        <td className="table-cell capitalize">{col.payment_method ?? '-'}</td>
+                        <td className="table-cell text-right font-semibold text-success-600">{formatCurrency(col.amount)}</td>
+                        <td className="table-cell text-ink-500">{col.reference ?? '-'}</td>
+                        <td className="table-cell text-ink-500">{col.notes ?? '-'}</td>
+                        {canEdit && (
+                          <td className="table-cell text-right">
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                onClick={() => openEditCollectionPayment(col)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                                title="Modificar cobro"
+                              >
+                                <Pencil size={13} /> Modificar
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(col)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-danger-50 px-2.5 py-1.5 text-xs font-semibold text-danger-700 hover:bg-danger-100 transition"
+                                title="Eliminar cobro"
+                              >
+                                <Trash2 size={13} /> Eliminar
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1112,7 +1259,7 @@ export default function Collections({ onDataChanged }: Props) {
                     .filter((s) => s.customer_id === paymentForm.customer_id)
                     .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.invoice_number ?? 'Sin folio'} – {formatCurrency(s.total)}
+                        {s.invoice_number ?? 'Sin folio'} — {formatCurrency(s.total)}
                       </option>
                     ))}
                 </select>
