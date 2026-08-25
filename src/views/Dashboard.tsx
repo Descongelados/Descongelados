@@ -139,6 +139,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         purchasesRes,
         collectionsRes,
         supplierPaymentsRes,
+        businessExpensesRes,
         lowStockRes,
         recentSalesRes,
         allWeekSalesRes,
@@ -149,6 +150,8 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
         applyWeek(supabase.from('purchases').select('total').eq('status', 'confirmada'), 'purchase_date'),
         applyWeek(supabase.from('collections').select('amount, payment_method'), 'collection_date'),
         applyWeek(supabase.from('supplier_payments').select('amount, payment_method'), 'payment_date'),
+        // Gastos extra (renta, gasolina, etc.) de la semana
+        applyWeek(supabase.from('business_expenses').select('amount, payment_method'), 'expense_date'),
         supabase.from('low_stock_products').select('id, sku, name, stock, min_stock'),
         // Últimas 10 ventas para display
         supabase
@@ -211,16 +214,17 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       type PayRow = { amount: number; payment_method: string };
       const collections = (collectionsRes.data ?? []) as PayRow[];
       const supplierPayments = (supplierPaymentsRes.data ?? []) as PayRow[];
+      const businessExpenses = (businessExpensesRes.data ?? []) as PayRow[];
 
       const totalCollected = collections.reduce((s, r) => s + r.amount, 0);
       const collectedCash  = collections.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0);
       const collectedBank  = collections.filter((r) => r.payment_method === 'banco').reduce((s, r) => s + r.amount, 0);
       const totalPaid = supplierPayments.reduce((s, r) => s + r.amount, 0);
 
-      // gastos en efectivo = pagos a proveedores en efectivo esta semana
-      const cashExpenses = supplierPayments
-        .filter((r) => r.payment_method === 'efectivo')
-        .reduce((s, r) => s + r.amount, 0);
+      // gastos en efectivo = pagos a proveedores + gastos extra, ambos en efectivo esta semana
+      const cashExpenses =
+        supplierPayments.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0) +
+        businessExpenses.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0);
 
       const actualLowStock = (lowStockRes.data ?? []) as Array<{ id: string; sku: string; name: string; stock: number; min_stock: number }>;
 
@@ -251,7 +255,10 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
       const weekSalesCollected  = weekCollections.reduce((s: number, c: ColRow) => s + c.amount, 0);
       const cashSales           = weekCollections.filter((c: ColRow) => c.payment_method === 'efectivo').reduce((s: number, c: ColRow) => s + c.amount, 0);
       const bankSalesCollected  = weekCollections.filter((c: ColRow) => c.payment_method === 'banco').reduce((s: number, c: ColRow) => s + c.amount, 0);
-      const bankExpenses        = totalPaid - cashExpenses;
+      // bankExpenses = pagos a proveedores en banco + gastos extra en banco
+      const bankExpenses =
+        (totalPaid - supplierPayments.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0)) +
+        businessExpenses.filter((r) => r.payment_method === 'banco').reduce((s, r) => s + r.amount, 0);
 
       setData({
         totalSales,
@@ -406,7 +413,7 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
               <div className="rounded-xl bg-danger-50 border border-danger-200 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-danger-600 mb-1">Gastos en efectivo</p>
                 <p className="text-xl font-bold text-danger-700">{formatCurrency(data.cashExpenses)}</p>
-                <p className="text-[11px] text-danger-500 mt-1">Pagos a proveedores</p>
+                <p className="text-[11px] text-danger-500 mt-1">Proveedores + gastos extra</p>
               </div>
 
               {/* Balance */}
@@ -500,4 +507,3 @@ export default function Dashboard({ onNavigate }: { onNavigate: (view: ViewKey) 
     </div>
   );
 }
-
