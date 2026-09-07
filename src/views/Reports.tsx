@@ -646,16 +646,16 @@ export default function Reports() {
               {/* Cobrado */}
               <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Cobrado</p>
-                <p className="text-xl font-bold text-success-700">{formatCurrency(metrics.periodSalesCollected)}</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(metrics.totalCollected)}</p>
                 <div className="flex gap-3 mt-2 pt-2 border-t border-success-200">
                   <div className="flex-1">
                     <p className="text-[11px] text-success-500 uppercase font-semibold">Efectivo</p>
-                    <p className="text-sm font-bold text-success-700">{formatCurrency(metrics.periodSalesCash)}</p>
+                    <p className="text-sm font-bold text-success-700">{formatCurrency(metrics.colEfectivo)}</p>
                   </div>
                   <div className="w-px bg-success-200" />
                   <div className="flex-1">
                     <p className="text-[11px] text-success-500 uppercase font-semibold">Banco</p>
-                    <p className="text-sm font-bold text-success-700">{formatCurrency(metrics.periodSalesBank)}</p>
+                    <p className="text-sm font-bold text-success-700">{formatCurrency(metrics.colBanco)}</p>
                   </div>
                 </div>
               </div>
