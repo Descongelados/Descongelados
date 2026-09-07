@@ -347,7 +347,7 @@ export default function Collections({ onDataChanged }: Props) {
           notes: paymentForm.notes.trim() || null,
         })
         .eq('id', editPayment.id);
-      if (error) push('error', 'No se pudo actualizar el pago');
+      if (error) push('error', `No se pudo actualizar el pago: ${error.message}`);
       else {
         push('success', 'Pago actualizado');
         setPaymentOpen(false);
@@ -381,7 +381,7 @@ export default function Collections({ onDataChanged }: Props) {
       if (b > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: b, payment_method: 'banco', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
       if (p > 0) rows.push({ customer_id: paymentTarget.customer_id, sale_id: paymentTarget.id, amount: p, payment_method: 'por_pagar', reference: paymentForm.reference.trim() || null, collection_date: baseDate, notes: paymentForm.notes.trim() || null });
       const { error } = await supabase.from('collections').insert(rows);
-      if (error) push('error', 'No se pudo registrar el pago combinado');
+      if (error) push('error', `No se pudo registrar el pago combinado: ${error.message}`);
       else {
         push('success', 'Pago combinado registrado');
         setPaymentOpen(false);
@@ -411,7 +411,7 @@ export default function Collections({ onDataChanged }: Props) {
       collection_date: fromDateInputValue(paymentForm.payment_date),
       notes: paymentForm.notes.trim() || null,
     });
-    if (error) push('error', 'No se pudo registrar el pago');
+    if (error) push('error', `No se pudo registrar el pago: ${error.message}`);
     else {
       push('success', 'Pago registrado');
       setPaymentOpen(false);
