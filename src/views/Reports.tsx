@@ -14,6 +14,8 @@ import {
   ChevronDown,
   ChevronRight,
   Receipt,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { formatCurrency, formatDate } from '../lib/format';
@@ -75,9 +77,10 @@ type SaleRow = {
   customer: { name: string; phone?: string } | null;
 };
 
-type CollectionRow = { amount: number; payment_method: string };
-type PurchaseRow = { total: number };
-type SupplierPaymentRow = { amount: number; payment_method: string };
+type CollectionRow = { sale_id?: string | null; amount: number; payment_method: string };
+type PurchaseRow = { id: string; total: number };
+type SupplierPaymentRow = { purchase_id?: string | null; amount: number; payment_method: string };
+type BusinessExpenseRow = { amount: number; payment_method: string };
 type SaleItemRow = {
   quantity: number;
   unit_price: number;
@@ -91,7 +94,13 @@ type ReportData = {
   collections: CollectionRow[];
   purchases: PurchaseRow[];
   supplierPayments: SupplierPaymentRow[];
+  businessExpenses: BusinessExpenseRow[];
   saleItems: SaleItemRow[];
+  deliveredSales: Array<{ id: string; total: number }>;
+  allPurchases: Array<{ id: string; total: number }>;
+  periodSaleIds: string[];
+  allCollectionsForBalance: Array<{ sale_id: string | null; amount: number; payment_method: string }>;
+  allSupplierPaymentsForBalance: Array<{ purchase_id: string | null; amount: number }>;
 };
 
 type PeriodGroup = {
@@ -209,6 +218,35 @@ export default function Reports() {
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
+  // Efectivo inicial
+  const [cashInitial, setCashInitial] = useState<number>(0);
+  const [editingCash, setEditingCash] = useState(false);
+  const [cashDraft, setCashDraft] = useState('');
+
+  useEffect(() => {
+    supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'dashboard_cash_initial')
+      .maybeSingle()
+      .then(({ data: row }) => {
+        if (row) setCashInitial(Number((row.value as { amount: number }).amount) || 0);
+      });
+  }, []);
+
+  const startEditCash = () => {
+    setCashDraft(String(cashInitial));
+    setEditingCash(true);
+  };
+  const commitCash = async () => {
+    const val = Math.max(0, Number(cashDraft) || 0);
+    setCashInitial(val);
+    setEditingCash(false);
+    await supabase
+      .from('app_settings')
+      .upsert({ key: 'dashboard_cash_initial', value: { amount: val } });
+  };
+
   // ── "productos por período" state ──────────────────────────────────────────
   const [grouping, setGrouping] = useState<'dia' | 'semana' | 'mes'>('dia');
   const [openPeriods, setOpenPeriods] = useState<Set<string>>(new Set());
@@ -228,7 +266,15 @@ export default function Reports() {
 
     const end = `${to}T23:59:59`;
 
-    const [salesRes, collectionsRes, purchasesRes, spRes] = await Promise.all([
+    const [
+      salesRes,
+      collectionsRes,
+      purchasesRes,
+      spRes,
+      businessExpensesRes,
+      allDeliveredSalesRes,
+      allPurchasesRes,
+    ] = await Promise.all([
       supabase
         .from('sales')
         .select('id, invoice_number, sale_date, total, subtotal, tax, status, customer:customers(name, phone)')
@@ -238,58 +284,98 @@ export default function Reports() {
         .order('sale_date', { ascending: false }),
       supabase
         .from('collections')
-        .select('amount, payment_method')
+        .select('sale_id, amount, payment_method')
         .gte('collection_date', from)
         .lte('collection_date', end),
       supabase
         .from('purchases')
-        .select('total')
+        .select('id, total')
         .eq('status', 'confirmada')
         .gte('purchase_date', from)
         .lte('purchase_date', end),
       supabase
         .from('supplier_payments')
-        .select('amount, payment_method')
+        .select('purchase_id, amount, payment_method')
         .gte('payment_date', from)
         .lte('payment_date', end),
+      supabase
+        .from('business_expenses')
+        .select('amount, payment_method')
+        .gte('expense_date', from)
+        .lte('expense_date', end),
+      supabase
+        .from('sales')
+        .select('id, total')
+        .eq('status', 'confirmada')
+        .eq('delivery_status', 'entregado'),
+      supabase
+        .from('purchases')
+        .select('id, total')
+        .eq('status', 'confirmada'),
     ]);
 
-    // Fetch sale_items scoped to the sales in range — sale_date via JOIN a sales
-    let saleItems: SaleItemRow[] = [];
-    if (!salesRes.error && salesRes.data && salesRes.data.length > 0) {
-      const saleIds = salesRes.data.map((s) => s.id);
-      const { data: itemData } = await supabase
-        .from('sale_items')
-        .select('quantity, unit_price, subtotal, product:products(name, cost_price), sale:sales(sale_date)')
-        .in('sale_id', saleIds);
-
-      saleItems = ((itemData ?? []) as unknown as {
-        quantity: number;
-        unit_price: number;
-        subtotal: number;
-        product: { name: string; cost_price: number } | null;
-        sale: { sale_date: string } | null;
-      }[]).map((it) => ({
-        quantity: it.quantity,
-        unit_price: it.unit_price,
-        subtotal: it.subtotal,
-        sale_date: it.sale?.sale_date ?? from,
-        product: it.product,
-      }));
-    }
-
-    if (salesRes.error || collectionsRes.error || purchasesRes.error || spRes.error) {
+    if (
+      salesRes.error ||
+      collectionsRes.error ||
+      purchasesRes.error ||
+      spRes.error ||
+      businessExpensesRes.error
+    ) {
       setError('No se pudieron cargar los datos del reporte');
       setLoading(false);
       return;
     }
 
+    const deliveredSales = (allDeliveredSalesRes.data ?? []) as Array<{ id: string; total: number }>;
+    const allPurchases = (allPurchasesRes.data ?? []) as Array<{ id: string; total: number }>;
+    const periodSales = (salesRes.data ?? []) as SaleRow[];
+    const periodSaleIds = periodSales.map((s) => s.id);
+
+    const deliveredSaleIds = deliveredSales.map((s) => s.id);
+    const allPurchaseIds = allPurchases.map((p) => p.id);
+    const saleIdsForCollections = [...new Set([...deliveredSaleIds, ...periodSaleIds])];
+
+    const [allCollectionsRes, allSupPaymentsRes, saleItemsRes] = await Promise.all([
+      saleIdsForCollections.length > 0
+        ? supabase.from('collections').select('sale_id, amount, payment_method').in('sale_id', saleIdsForCollections)
+        : Promise.resolve({ data: [], error: null }),
+      allPurchaseIds.length > 0
+        ? supabase.from('supplier_payments').select('purchase_id, amount').in('purchase_id', allPurchaseIds)
+        : Promise.resolve({ data: [], error: null }),
+      periodSaleIds.length > 0
+        ? supabase
+            .from('sale_items')
+            .select('quantity, unit_price, subtotal, product:products(name, cost_price), sale:sales(sale_date)')
+            .in('sale_id', periodSaleIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const saleItems: SaleItemRow[] = ((saleItemsRes.data ?? []) as unknown as {
+      quantity: number;
+      unit_price: number;
+      subtotal: number;
+      product: { name: string; cost_price: number } | null;
+      sale: { sale_date: string } | null;
+    }[]).map((it) => ({
+      quantity: it.quantity,
+      unit_price: it.unit_price,
+      subtotal: it.subtotal,
+      sale_date: it.sale?.sale_date ?? from,
+      product: it.product,
+    }));
+
     setReportData({
-      sales: (salesRes.data ?? []) as unknown as SaleRow[],
+      sales: periodSales,
       collections: (collectionsRes.data ?? []) as CollectionRow[],
       purchases: (purchasesRes.data ?? []) as PurchaseRow[],
       supplierPayments: (spRes.data ?? []) as SupplierPaymentRow[],
+      businessExpenses: (businessExpensesRes.data ?? []) as BusinessExpenseRow[],
       saleItems,
+      deliveredSales,
+      allPurchases,
+      periodSaleIds,
+      allCollectionsForBalance: (allCollectionsRes.data ?? []) as Array<{ sale_id: string | null; amount: number; payment_method: string }>,
+      allSupplierPaymentsForBalance: (allSupPaymentsRes.data ?? []) as Array<{ purchase_id: string | null; amount: number }>,
     });
     setLoading(false);
   };
@@ -301,7 +387,19 @@ export default function Reports() {
 
   const metrics = useMemo(() => {
     if (!reportData) return null;
-    const { sales, collections, purchases, supplierPayments, saleItems } = reportData;
+    const {
+      sales,
+      collections,
+      purchases,
+      supplierPayments,
+      businessExpenses,
+      saleItems,
+      deliveredSales,
+      allPurchases,
+      periodSaleIds,
+      allCollectionsForBalance,
+      allSupplierPaymentsForBalance,
+    } = reportData;
 
     const totalPurchases = purchases.reduce((s, r) => s + r.total, 0);
 
@@ -325,7 +423,50 @@ export default function Reports() {
       .reduce((s, p) => s + p.amount, 0);
     const totalPaid = supplierPayments.reduce((s, p) => s + p.amount, 0);
 
-    // Ganancia real: Σ (precio_venta − costo_compra) × cantidad  por cada línea vendida
+    // Gastos en efectivo = pagos a proveedores + gastos extra en efectivo en el período
+    const cashExpenses =
+      spEfectivo +
+      businessExpenses.filter((r) => r.payment_method === 'efectivo').reduce((s, r) => s + r.amount, 0);
+
+    // Gastos en banco = pagos a proveedores en banco + gastos extra en banco en el período
+    const bankExpenses =
+      spBanco +
+      businessExpenses.filter((r) => r.payment_method === 'banco').reduce((s, r) => s + r.amount, 0);
+
+    // Saldo real por cobrar de ventas entregadas
+    const colBySale = new Map<string, number>();
+    for (const c of allCollectionsForBalance) {
+      if (c.sale_id) colBySale.set(c.sale_id, (colBySale.get(c.sale_id) ?? 0) + c.amount);
+    }
+    const totalToCollect = deliveredSales.reduce((acc, s) => {
+      const balance = s.total - (colBySale.get(s.id) ?? 0);
+      return acc + Math.max(0, balance);
+    }, 0);
+
+    // Saldo real por pagar de compras confirmadas
+    const payByPurchase = new Map<string, number>();
+    for (const p of allSupplierPaymentsForBalance) {
+      if (p.purchase_id) payByPurchase.set(p.purchase_id, (payByPurchase.get(p.purchase_id) ?? 0) + p.amount);
+    }
+    const totalToPay = allPurchases.reduce((acc, p) => {
+      const balance = p.total - (payByPurchase.get(p.id) ?? 0);
+      return acc + Math.max(0, balance);
+    }, 0);
+
+    // Cobros asociados a ventas creadas en el período
+    const periodSaleIdSet = new Set(periodSaleIds);
+    const periodCollections = allCollectionsForBalance.filter(
+      (c) => c.sale_id && periodSaleIdSet.has(c.sale_id)
+    );
+    const periodSalesCollected = periodCollections.reduce((s, c) => s + c.amount, 0);
+    const periodSalesCash = periodCollections
+      .filter((c) => c.payment_method === 'efectivo')
+      .reduce((s, c) => s + c.amount, 0);
+    const periodSalesBank = periodCollections
+      .filter((c) => c.payment_method === 'banco')
+      .reduce((s, c) => s + c.amount, 0);
+
+    // Ganancia real: Σ (precio_venta − costo_compra) × cantidad por cada línea vendida
     const ganancia = saleItems.reduce((acc, it) => {
       const costPrice = it.product?.cost_price ?? 0;
       return acc + (it.unit_price - costPrice) * it.quantity;
@@ -359,6 +500,13 @@ export default function Reports() {
       colPorPagar,
       spEfectivo,
       spBanco,
+      cashExpenses,
+      bankExpenses,
+      totalToCollect,
+      totalToPay,
+      periodSalesCollected,
+      periodSalesCash,
+      periodSalesBank,
       ganancia,
       gananciaEfectivo,
       gananciaBanco,
@@ -486,88 +634,165 @@ export default function Reports() {
             <p className="text-xs text-ink-400">Comprobante interno · no fiscal</p>
           </div>
 
-          {/* ── KPI grid ── */}
-          <section>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500 mb-3">Resumen del período · {rangeLabel}</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* ── Resumen del período ── */}
+          <div className="card p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp size={18} className="text-brand-600" />
+              <h3 className="font-semibold text-ink-900">Resumen del período</h3>
+              <span className="ml-1 text-xs text-ink-400">· {rangeLabel}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
 
-              {/* Ventas */}
-              <div className="card p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-success-50 text-success-600">
-                    <TrendingUp size={18} />
+              {/* Cobrado */}
+              <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Cobrado</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(metrics.periodSalesCollected)}</p>
+                <div className="flex gap-3 mt-2 pt-2 border-t border-success-200">
+                  <div className="flex-1">
+                    <p className="text-[11px] text-success-500 uppercase font-semibold">Efectivo</p>
+                    <p className="text-sm font-bold text-success-700">{formatCurrency(metrics.periodSalesCash)}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-ink-500 uppercase font-semibold">Total ventas</p>
-                    <p className="text-xl font-bold text-ink-900">{formatCurrency(metrics.totalSales)}</p>
-                  </div>
-                </div>
-                <div className="space-y-1 border-t border-ink-100 pt-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Banknote size={13} /> Efectivo cobrado</span>
-                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.colEfectivo)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco cobrado</span>
-                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.colBanco)}</span>
+                  <div className="w-px bg-success-200" />
+                  <div className="flex-1">
+                    <p className="text-[11px] text-success-500 uppercase font-semibold">Banco</p>
+                    <p className="text-sm font-bold text-success-700">{formatCurrency(metrics.periodSalesBank)}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Gastos */}
-              <div className="card p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-danger-50 text-danger-600">
-                    <ShoppingCart size={18} />
+              {/* Compras */}
+              <div className="rounded-xl bg-brand-50 border border-brand-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-600 mb-1">Compras</p>
+                <p className="text-xl font-bold text-brand-700">{formatCurrency(metrics.totalPurchases)}</p>
+                <div className="flex gap-3 mt-2 pt-2 border-t border-brand-200">
+                  <div className="flex-1">
+                    <p className="text-[11px] text-brand-400 uppercase font-semibold">Efectivo</p>
+                    <p className="text-sm font-bold text-brand-700">{formatCurrency(metrics.cashExpenses)}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-ink-500 uppercase font-semibold">Total gastos</p>
-                    <p className="text-xl font-bold text-ink-900">{formatCurrency(metrics.totalPurchases)}</p>
-                  </div>
-                </div>
-                <div className="space-y-1 border-t border-ink-100 pt-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Banknote size={13} /> Efectivo pagado</span>
-                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.spEfectivo)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco pagado</span>
-                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.spBanco)}</span>
+                  <div className="w-px bg-brand-200" />
+                  <div className="flex-1">
+                    <p className="text-[11px] text-brand-400 uppercase font-semibold">Banco</p>
+                    <p className="text-sm font-bold text-brand-700">{formatCurrency(metrics.bankExpenses)}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Ganancia */}
-              <div className="card p-5 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${metrics.ganancia >= 0 ? 'bg-brand-50 text-brand-600' : 'bg-danger-50 text-danger-600'}`}>
-                    {metrics.ganancia >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-                  </div>
-                  <div>
-                    <p className="text-xs text-ink-500 uppercase font-semibold">Ganancia neta</p>
-                    <p className={`text-xl font-bold ${metrics.ganancia >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
-                      {formatCurrency(metrics.ganancia)}
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-1 border-t border-ink-100 pt-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Banknote size={13} /> Efectivo</span>
-                    <span className={`font-semibold ${metrics.gananciaEfectivo >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
-                      {formatCurrency(metrics.gananciaEfectivo)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco</span>
-                    <span className={`font-semibold ${metrics.gananciaBanco >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
-                      {formatCurrency(metrics.gananciaBanco)}
-                    </span>
-                  </div>
-                </div>
+              {/* Por cobrar */}
+              <div className="rounded-xl bg-accent-50 border border-accent-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-accent-600 mb-1">Por cobrar</p>
+                <p className="text-xl font-bold text-accent-700">{formatCurrency(metrics.totalToCollect)}</p>
+                <p className="text-[11px] text-accent-500 mt-2">Ventas entregadas sin cobrar</p>
+              </div>
+
+              {/* Por pagar */}
+              <div className="rounded-xl bg-warning-50 border border-warning-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-warning-600 mb-1">Por pagar</p>
+                <p className="text-xl font-bold text-warning-700">{formatCurrency(metrics.totalToPay)}</p>
+                <p className="text-[11px] text-warning-500 mt-2">Compras sin pagar</p>
               </div>
 
             </div>
-          </section>
+          </div>
+
+          {/* ── Resumen Efectivo ── */}
+          <div className="card p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Banknote size={18} className="text-success-600" />
+              <h3 className="font-semibold text-ink-900">Resumen Efectivo</h3>
+              <span className="ml-1 text-xs text-ink-400">· {rangeLabel}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+
+              {/* Efectivo inicial */}
+              <div className="rounded-xl bg-ink-50 border border-ink-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-500 mb-1">Efectivo inicial</p>
+                {editingCash ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm text-ink-500">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="input py-1 text-base font-bold w-full"
+                      value={cashDraft}
+                      onChange={(e) => setCashDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') commitCash(); if (e.key === 'Escape') setEditingCash(false); }}
+                      autoFocus
+                    />
+                    <button onClick={commitCash} className="rounded-lg p-1.5 bg-success-50 text-success-600 hover:bg-success-100 transition" title="Confirmar">
+                      <Check size={15} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl font-bold text-ink-900">{formatCurrency(cashInitial)}</span>
+                    <button onClick={startEditCash} className="rounded-lg p-1 text-ink-400 hover:bg-ink-200 hover:text-ink-700 transition" title="Editar">
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+                )}
+                <p className="text-[11px] text-ink-400 mt-1">Editable · no se guarda en BD</p>
+              </div>
+
+              {/* Ventas en efectivo */}
+              <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Ventas en efectivo</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(metrics.colEfectivo)}</p>
+                <p className="text-[11px] text-success-500 mt-1">Cobros en efectivo · {rangeLabel}</p>
+              </div>
+
+              {/* Gastos en efectivo */}
+              <div className="rounded-xl bg-danger-50 border border-danger-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-danger-600 mb-1">Gastos en efectivo</p>
+                <p className="text-xl font-bold text-danger-700">{formatCurrency(metrics.cashExpenses)}</p>
+                <p className="text-[11px] text-danger-500 mt-1">Proveedores + gastos extra</p>
+              </div>
+
+              {/* Balance */}
+              {(() => {
+                const balance = cashInitial + metrics.colEfectivo - metrics.cashExpenses;
+                const positive = balance >= 0;
+                return (
+                  <div className={`rounded-xl border px-4 py-3 ${positive ? 'bg-brand-50 border-brand-200' : 'bg-warning-50 border-warning-200'}`}>
+                    <p className={`text-xs font-semibold uppercase tracking-wide mb-1 ${positive ? 'text-brand-600' : 'text-warning-600'}`}>Balance</p>
+                    <p className={`text-xl font-bold ${positive ? 'text-brand-700' : 'text-warning-700'}`}>{formatCurrency(balance)}</p>
+                    <p className={`text-[11px] mt-1 ${positive ? 'text-brand-400' : 'text-warning-500'}`}>
+                      Inicial + ventas − gastos
+                    </p>
+                  </div>
+                );
+              })()}
+
+            </div>
+          </div>
+
+          {/* ── Ventas del período + Cobranza realizada ── */}
+          <div className="card p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Wallet size={18} className="text-success-600" />
+              <h3 className="font-semibold text-ink-900">Ventas del período + Cobranza realizada</h3>
+              <span className="ml-1 text-xs text-ink-400">· {rangeLabel}</span>
+            </div>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-success-50 text-success-600 shrink-0">
+                <Wallet size={20} />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-ink-900">{formatCurrency(metrics.totalCollected)}</p>
+                <p className="text-sm text-ink-500">Total cobrado en el período</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-xl bg-success-50 border border-success-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-success-600 mb-1">Efectivo</p>
+                <p className="text-xl font-bold text-success-700">{formatCurrency(metrics.colEfectivo)}</p>
+              </div>
+              <div className="rounded-xl bg-brand-50 border border-brand-200 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-600 mb-1">Banco</p>
+                <p className="text-xl font-bold text-brand-700">{formatCurrency(metrics.colBanco)}</p>
+              </div>
+            </div>
+          </div>
 
           {/* ── charts row ── */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
