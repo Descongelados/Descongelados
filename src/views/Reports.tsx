@@ -634,7 +634,90 @@ export default function Reports() {
             <p className="text-xs text-ink-400">Comprobante interno · no fiscal</p>
           </div>
 
-          {/* ── Resumen del período ── */}
+          {/* ── KPI grid / Resumen Financiero con Ganancia ── */}
+          <section>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500 mb-3">Resumen financiero · {rangeLabel}</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+              {/* Ventas */}
+              <div className="card p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-success-50 text-success-600">
+                    <TrendingUp size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-ink-500 uppercase font-semibold">Total ventas</p>
+                    <p className="text-xl font-bold text-ink-900">{formatCurrency(metrics.totalSales)}</p>
+                  </div>
+                </div>
+                <div className="space-y-1 border-t border-ink-100 pt-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Banknote size={13} /> Efectivo cobrado</span>
+                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.colEfectivo)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco cobrado</span>
+                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.colBanco)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Gastos */}
+              <div className="card p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-danger-50 text-danger-600">
+                    <ShoppingCart size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-ink-500 uppercase font-semibold">Total gastos</p>
+                    <p className="text-xl font-bold text-ink-900">{formatCurrency(metrics.totalPurchases)}</p>
+                  </div>
+                </div>
+                <div className="space-y-1 border-t border-ink-100 pt-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Banknote size={13} /> Efectivo pagado</span>
+                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.spEfectivo)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco pagado</span>
+                    <span className="font-semibold text-ink-800">{formatCurrency(metrics.spBanco)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ganancia */}
+              <div className="card p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${metrics.ganancia >= 0 ? 'bg-brand-50 text-brand-600' : 'bg-danger-50 text-danger-600'}`}>
+                    {metrics.ganancia >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+                  </div>
+                  <div>
+                    <p className="text-xs text-ink-500 uppercase font-semibold">Ganancia neta</p>
+                    <p className={`text-xl font-bold ${metrics.ganancia >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                      {formatCurrency(metrics.ganancia)}
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-1 border-t border-ink-100 pt-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Banknote size={13} /> Efectivo</span>
+                    <span className={`font-semibold ${metrics.gananciaEfectivo >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                      {formatCurrency(metrics.gananciaEfectivo)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1.5 text-ink-500"><Building size={13} /> Banco</span>
+                    <span className={`font-semibold ${metrics.gananciaBanco >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                      {formatCurrency(metrics.gananciaBanco)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          {/* ── Resumen Operativo del período ── */}
           <div className="card p-5">
             <div className="flex items-center gap-2 mb-4">
               <TrendingUp size={18} className="text-brand-600" />
