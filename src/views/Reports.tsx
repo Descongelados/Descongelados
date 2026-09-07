@@ -285,23 +285,23 @@ export default function Reports() {
       supabase
         .from('collections')
         .select('sale_id, amount, payment_method')
-        .gte('collection_date', from)
+        .gte('collection_date', `${from}T00:00:00`)
         .lte('collection_date', end),
       supabase
         .from('purchases')
         .select('id, total')
         .eq('status', 'confirmada')
-        .gte('purchase_date', from)
+        .gte('purchase_date', `${from}T00:00:00`)
         .lte('purchase_date', end),
       supabase
         .from('supplier_payments')
         .select('purchase_id, amount, payment_method')
-        .gte('payment_date', from)
+        .gte('payment_date', `${from}T00:00:00`)
         .lte('payment_date', end),
       supabase
         .from('business_expenses')
         .select('amount, payment_method')
-        .gte('expense_date', from)
+        .gte('expense_date', `${from}T00:00:00`)
         .lte('expense_date', end),
       supabase
         .from('sales')
