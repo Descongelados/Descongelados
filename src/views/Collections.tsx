@@ -112,6 +112,7 @@ export default function Collections({ onDataChanged }: Props) {
 
   const [editPayment, setEditPayment] = useState<CollectionRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CollectionRow | null>(null);
+  const [deleteSaleTarget, setDeleteSaleTarget] = useState<SaleRow | null>(null);
   const [confirmDelivery, setConfirmDelivery] = useState<SaleRow | null>(null);
   const [receiptSale, setReceiptSale] = useState<SaleRow | null>(null);
 
@@ -448,6 +449,23 @@ export default function Collections({ onDataChanged }: Props) {
       onDataChanged?.();
     }
     setDeleteTarget(null);
+  };
+
+  const confirmDeleteSale = async () => {
+    if (!deleteSaleTarget) return;
+    // Eliminar cobros asociados, luego items, luego la venta
+    const { error: colErr } = await supabase.from('collections').delete().eq('sale_id', deleteSaleTarget.id);
+    if (colErr) { push('error', 'No se pudo eliminar la venta'); setDeleteSaleTarget(null); return; }
+    const { error: itemsErr } = await supabase.from('sale_items').delete().eq('sale_id', deleteSaleTarget.id);
+    if (itemsErr) { push('error', 'No se pudo eliminar la venta'); setDeleteSaleTarget(null); return; }
+    const { error: saleErr } = await supabase.from('sales').delete().eq('id', deleteSaleTarget.id);
+    if (saleErr) push('error', 'No se pudo eliminar la venta');
+    else {
+      push('success', 'Venta eliminada');
+      await load();
+      onDataChanged?.();
+    }
+    setDeleteSaleTarget(null);
   };
 
   // ── open edit-sale modal ──────────────────────────────────────────────
@@ -831,34 +849,44 @@ export default function Collections({ onDataChanged }: Props) {
                           {formatCurrency(s.balance)}
                         </td>
                         <td className="table-cell text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            {isAdmin && (
-                              <button
-                                onClick={() => openEditSale(s)}
-                                className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
-                                title="Editar venta"
-                              >
-                                <Pencil size={13} /> Editar venta
-                              </button>
-                            )}
-                            {canEdit && (
+                        <div className="flex items-center justify-end gap-1">
+                          {isAdmin && (
                             <button
-                              onClick={() => openRegisterPayment(s)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
+                              onClick={() => openEditSale(s)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-warning-50 px-2.5 py-1.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 transition"
+                              title="Editar venta"
                             >
-                              <Wallet size={14} /> Registrar pago
+                              <Pencil size={13} /> Editar venta
                             </button>
-                            )}
+                          )}
+                          {canEdit && (
+                          <button
+                            onClick={() => openRegisterPayment(s)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition"
+                          >
+                            <Wallet size={14} /> Registrar pago
+                          </button>
+                          )}
+                          <button
+                            onClick={() => setReceiptSale(s)}
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
+                            aria-label="Ver ticket"
+                            title="Ver ticket"
+                          >
+                            <Receipt size={16} />
+                          </button>
+                          {isAdmin && (
                             <button
-                              onClick={() => setReceiptSale(s)}
-                              className="rounded-lg p-1.5 text-ink-500 hover:bg-success-50 hover:text-success-600 transition"
-                              aria-label="Ver ticket"
-                              title="Ver ticket"
+                              onClick={() => setDeleteSaleTarget(s)}
+                              className="rounded-lg p-1.5 text-ink-400 hover:bg-danger-50 hover:text-danger-600 transition"
+                              aria-label="Eliminar venta"
+                              title="Eliminar venta"
                             >
-                              <Receipt size={16} />
+                              <Trash2 size={15} />
                             </button>
-                          </div>
-                        </td>
+                          )}
+                        </div>
+                      </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1431,6 +1459,15 @@ export default function Collections({ onDataChanged }: Props) {
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      <ConfirmDialog
+        open={!!deleteSaleTarget}
+        title="Eliminar venta"
+        message={`¿Eliminar la venta ${deleteSaleTarget?.invoice_number ?? ''} de ${deleteSaleTarget?.customer?.name ?? ''}? Se eliminarán también sus cobros registrados. Esta acción no se puede deshacer.`}
+        onConfirm={confirmDeleteSale}
+        onCancel={() => setDeleteSaleTarget(null)}
+      />
+
       <SaleReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />
 
       {/* ── Modal: Editar venta (admin only) ── */}
